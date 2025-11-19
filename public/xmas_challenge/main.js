@@ -12,6 +12,8 @@ const incompleteBtn = document.getElementById("incompleteBtn");
 const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
+const resetBtn = document.getElementById("resetBtn"); // 🔁 Nulstil-knappen
+
 // --- State ---
 let teams = [];
 let nextTeamId = 1;
@@ -195,12 +197,38 @@ function handleNo() {
 
 function handleIncomplete() {
   if (!currentChallengeType) {
-    alert("Vælg en udfordring først.");
+    alert(
+      "Vælg en udfordring først."
+    );
     return;
   }
   alert(
     `❔ Udfordring "${currentChallengeType}" blev markeret som ikke fuldført.`
   );
+}
+
+// --- Reset all data ---
+function handleReset() {
+  const sure = confirm(
+    "Er du sikker på, at du vil nulstille alle hold og point?\nDette kan ikke fortrydes."
+  );
+  if (!sure) return;
+
+  teams = [];
+  nextTeamId = 1;
+  selectedTeamId = null;
+  currentChallengeType = null;
+  endGameResultEl.textContent = "";
+
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {
+    console.error("Could not clear state", e);
+  }
+
+  renderTeams();
+  setCurrentChallenge(null);
+  teamNameInput.focus();
 }
 
 // --- End game logic ---
@@ -243,6 +271,7 @@ yesBtn.addEventListener("click", handleYes);
 noBtn.addEventListener("click", handleNo);
 incompleteBtn.addEventListener("click", handleIncomplete);
 endGameBtn.addEventListener("click", handleEndGame);
+resetBtn.addEventListener("click", handleReset); // 🔁 reset handler
 
 // --- Initial load ---
 loadState();
