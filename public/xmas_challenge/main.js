@@ -18,6 +18,9 @@ let nextTeamId = 1;
 let selectedTeamId = null;
 let currentChallengeType = null;
 
+// Cooldown so you don't double-click while the list is moving
+let isPointsCooldown = false;
+
 function renderTeams() {
   // Sort by points (desc), then by name
   const sorted = [...teams].sort((a, b) => {
@@ -89,10 +92,19 @@ function addTeam(name) {
 }
 
 function changePoints(teamId, delta) {
+  // Prevent rapid double clicks while leaderboard is moving
+  if (isPointsCooldown) return;
+
   const team = teams.find((t) => t.id === teamId);
   if (!team) return;
+
   team.points += delta;
   renderTeams();
+
+  isPointsCooldown = true;
+  setTimeout(() => {
+    isPointsCooldown = false;
+  }, 500); // 0.5 seconds cooldown
 }
 
 function setCurrentChallenge(type) {
