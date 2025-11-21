@@ -31,6 +31,9 @@ const endGameResultEl = document.getElementById("endGameResult");
 
 const resetBtn = document.getElementById("resetBtn");
 
+const gameCodeValueEl = document.getElementById("gameCodeValue");
+
+
 // optional: if you later add a Start Game button in HTML
 const startGameBtn = document.getElementById("startGameBtn");
 
@@ -408,6 +411,11 @@ socket.on("state", (serverState) => {
   console.log("Received state from server:", serverState);
   if (!serverState) return;
 
+  if (serverState.gameCode && gameCodeValueEl) {
+  gameCodeValueEl.textContent = serverState.gameCode;
+}
+
+
   if (Array.isArray(serverState.teams)) {
     teams = serverState.teams;
   } else {
@@ -437,3 +445,4 @@ loadStateFromLocal();
 renderTeams();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
+
