@@ -128,17 +128,32 @@ function renderLeaderboard(teams) {
 }
 
 function renderChallenge(challenge) {
+  // Default: buzz OFF
+  buzzBtn.disabled = true;
+
   if (!challenge) {
     challengeTitle.textContent = "Ingen udfordring endnu";
     challengeText.textContent = "Vent på læreren…";
     return;
   }
 
+  let type = null;
+
   if (typeof challenge === "string") {
+    type = challenge;
     challengeTitle.textContent = challenge;
     challengeText.textContent = "Se instruktioner på skærmen.";
   } else {
-    challengeTitle.textContent = challenge.type || "Ny udfordring!";
+    type = challenge.type || "Ny udfordring!";
+    challengeTitle.textContent = type;
     challengeText.textContent = challenge.text || "Se instruktioner på skærmen.";
   }
+
+  // ✅ Only allow buzz in specific challenges
+  const buzzAllowedTypes = ["Nisse Grandprix"];
+  if (buzzAllowedTypes.includes(type)) {
+    buzzBtn.disabled = false;
+  }
 }
+
+
