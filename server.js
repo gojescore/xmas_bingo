@@ -6,6 +6,10 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 
+// -----------------------------
+// FILES / STATIC
+// -----------------------------
+
 // Create uploads folder if missing
 if (!fs.existsSync("./uploads")) {
   fs.mkdirSync("./uploads");
@@ -14,201 +18,257 @@ if (!fs.existsSync("./uploads")) {
 app.use(express.static("public"));
 app.use("/uploads", express.static("uploads"));
 
-// -------------------------
-// GLOBAL GAME SESSION STATE
-// -------------------------
-let gameCode = null;         // e.g. "4712"
-let gameActive = false;      // true after startGame
-
-let state = {
-  teams: [],                 // [{ id, name, points }]
-  leaderboard: [],           // not used yet, but kept for compatibility
-  currentChallenge: null,    // string or object
-};
-
-// For stable IDs
-let nextTeamId = 1;
-
-// Helper: generate a 4-digit code
-function generateGameCode() {
-  return Math.floor(1000 + Math.random() * 9000).toString();
-}
-
-// Helper: normalize names for uniqueness comparison
-function normalizeName(name) {
-  return name.trim().toLowerCase();
-}
-
 // Multer for image uploads
-const upload = multer({
-  dest: "./uploads/",
-});
+const upload = multer({ dest: "./uploads/" });
 
 app.post("/upload", upload.single("file"), (req, res) => {
   res.json({ filename: req.file.filename });
 });
 
+// -----------------------------
+// GAME STATE
+// -----------------------------
+
+function makeGameCode() {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+let state = {
+  gameCode: null,
+  teams: [], // [{id,name,points}]
+  leaderboard: [], // not used yet but kept for future
+  currentChallenge: null, // string or object {type, phase, ...}
+};
+
+let nextTeamId = 1;
+
+// Helper: broadcast full state
+function emitState() {
+  io.emit("state", state);
+}
+
+// Helper: find team by id or name
+function findTeamById(id) {
+  return state.teams.find(t => t.id === id);
+}
+function findTeamByName(name) {
+  return state.teams.find(t => t.name.toLowerCase() === name.toLowerCase());
+}
+
+// -----------------------------
 // SOCKET.IO
+// -----------------------------
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  // Send current state + code to anyone who connects
-  socket.emit("state", { ...state, gameCode, gameActive });
+  // Send current state to anyone who connects
+  socket.emit("state", state);
 
-  // -------------------------
-  // ADMIN: START GLOBAL GAME
-  // -------------------------
-  // Admin calls socket.emit("startGame", cb)
-  socket.on("startGame", (cb) => {
-    gameCode = generateGameCode();
-    gameActive = true;
-
-    // Reset game state for a fresh session
-    state = {
-      teams: [],
-      leaderboard: [],
-      currentChallenge: null,
-    };
+  // -----------------------------
+  // ADMIN: START NEW GAME
+  // -----------------------------
+  socket.on("startGame", () => {
+    state.gameCode = makeGameCode();
+    state.teams = [];
     nextTeamId = 1;
+    state.currentChallenge = null;
 
-    console.log("Game started. Code:", gameCode);
+    console.log("Game started. Code:", state.gameCode);
+    emitState();
+  });
 
-    // Broadcast fresh state to everyone
-    io.emit("state", { ...state, gameCode, gameActive });
+  // -----------------------------
+  // TEAM: JOIN GAME BY CODE + NAME
+  // -----------------------------
+  socket.on("joinGame", ({ code, teamName }, ack) => {
+    try {
+      const cleanCode = (code || "").trim();
+      const cleanName = (teamName || "").trim();
 
-    if (typeof cb === "function") {
-      cb({ ok: true, gameCode });
+      if (!state.gameCode) {
+        return ack?.({ ok: false, message: "Spillet er ikke startet endnu." });
+      }
+      if (cleanCode !== state.gameCode) {
+        return ack?.({ ok: false, message: "Forkert game code." });
+      }
+      if (!cleanName) {
+        return ack?.({ ok: false, message: "Teamnavn mangler." });
+      }
+      if (findTeamByName(cleanName)) {
+        return ack?.({ ok: false, message: "Teamnavnet er allerede taget." });
+      }
+
+      const newTeam = {
+        id: nextTeamId++,
+        name: cleanName,
+        points: 0,
+      };
+
+      state.teams.push(newTeam);
+
+      socket.teamId = newTeam.id;
+      socket.teamName = newTeam.name;
+
+      console.log("Team joined:", newTeam.name);
+      emitState();
+
+      return ack?.({ ok: true, team: newTeam });
+    } catch (err) {
+      console.error("joinGame error", err);
+      return ack?.({ ok: false, message: "Serverfejl ved join." });
     }
   });
 
-  // -------------------------
-  // TEAMS: JOIN WITH CODE + UNIQUE NAME
-  // -------------------------
-  // Team calls socket.emit("joinGame", { code, teamName }, cb)
-  socket.on("joinGame", (payload, cb) => {
-    const code = payload?.code?.toString().trim();
-    const teamName = payload?.teamName?.toString().trim();
-
-    if (!gameActive || !gameCode) {
-      if (typeof cb === "function") {
-        cb({ ok: false, message: "No active game right now." });
-      }
-      return;
-    }
-
-    if (!code || code !== gameCode) {
-      if (typeof cb === "function") {
-        cb({ ok: false, message: "Wrong game code." });
-      }
-      return;
-    }
-
-    if (!teamName) {
-      if (typeof cb === "function") {
-        cb({ ok: false, message: "Team name is required." });
-      }
-      return;
-    }
-
-    const normalized = normalizeName(teamName);
-    const nameTaken = state.teams.some(
-      (t) => normalizeName(t.name) === normalized
-    );
-
-    if (nameTaken) {
-      if (typeof cb === "function") {
-        cb({ ok: false, message: "Name already taken. Choose another." });
-      }
-      return;
-    }
-
-    // Add team to global game
-    const newTeam = {
-      id: nextTeamId++,
-      name: teamName,
-      points: 0,
-    };
-    state.teams.push(newTeam);
-
-    // Store on socket for later events (buzz, submitCard, etc.)
-    socket.teamId = newTeam.id;
-    socket.teamName = newTeam.name;
-
-    console.log("Team joined:", newTeam.name);
-
-    // Broadcast updated state to everyone
-    io.emit("state", { ...state, gameCode, gameActive });
-
-    if (typeof cb === "function") {
-      cb({ ok: true, team: newTeam });
-    }
-  });
-
-  // -------------------------
-  // BACKWARD COMPAT: old joinTeam
-  // (optional - keeps old clients from breaking)
-  // -------------------------
-  socket.on("joinTeam", (teamName) => {
-    socket.teamName = teamName;
-  });
-
-  // -------------------------
-  // BUZZ
-  // -------------------------
+  // -----------------------------
+  // BASIC BUZZ (used by Grandprix)
+  // -----------------------------
   socket.on("buzz", () => {
-    if (!socket.teamName) return;
-    io.emit("buzzed", socket.teamName);
+    const teamId = socket.teamId;
+    const teamName = socket.teamName;
+
+    if (!teamId || !teamName) return;
+
+    const ch = state.currentChallenge;
+
+    // Only handle buzz in Nisse Grandprix listening phase
+    if (!ch || (typeof ch === "string")) return;
+    if (ch.type !== "Nisse Grandprix") return;
+    if (ch.phase !== "listening") return;
+
+    // If team already locked out for this round, ignore
+    if (Array.isArray(ch.lockedOut) && ch.lockedOut.includes(teamId)) {
+      socket.emit("buzzRejected", { reason: "lockedOut" });
+      return;
+    }
+
+    // If someone already buzzed first, ignore
+    if (ch.firstBuzz) {
+      socket.emit("buzzRejected", { reason: "tooLate" });
+      return;
+    }
+
+    // FIRST BUZZ WINS
+    ch.firstBuzz = { teamId, teamName, at: Date.now() };
+    ch.phase = "locked";
+
+    console.log("First buzz:", teamName);
+
+    io.emit("buzzed", teamName);  // UI feedback
+    emitState();
   });
 
-  // -------------------------
-  // SUBMISSIONS / VOTES (kept)
-  // -------------------------
-  socket.on("submitCard", (text) => {
-    if (!socket.teamName) return;
-    io.emit("newCard", { team: socket.teamName, text });
-  });
-
-  socket.on("submitPhoto", (file) => {
-    if (!socket.teamName) return;
-    io.emit("newPhoto", { team: socket.teamName, file });
-  });
-
-  socket.on("vote", (index) => {
-    if (!socket.teamName) return;
-    io.emit("voteUpdate", { voter: socket.teamName, index });
-  });
-
-  // -------------------------
-  // ADMIN: UPDATE GLOBAL STATE
-  // -------------------------
+  // -----------------------------
+  // ADMIN: SET CHALLENGE (GENERIC)
+  // If your admin already uses updateState,
+  // this keeps working.
+  // -----------------------------
   socket.on("updateState", (newState) => {
-    // Only allow updates if a game is active
-    if (!gameActive) return;
+    // Keep gameCode safe if admin forgets to send it
+    const safeCode = state.gameCode;
 
-    // Merge carefully so we don't lose teams list
-    state = {
-      ...state,
-      ...newState,
-      teams: state.teams, // teams are server-owned now
+    state = newState || state;
+    if (!state.gameCode) state.gameCode = safeCode;
+
+    emitState();
+  });
+
+  // -----------------------------
+  // ADMIN: START GRANDPRIX (distributed audio)
+  // payload: { audioUrl, startDelayMs=2000 }
+  // -----------------------------
+  socket.on("startGrandprix", ({ audioUrl, startDelayMs } = {}) => {
+    if (!audioUrl) return;
+
+    const delay = typeof startDelayMs === "number" ? startDelayMs : 2000;
+    const now = Date.now();
+
+    state.currentChallenge = {
+      type: "Nisse Grandprix",
+      phase: "listening",
+      audioUrl,
+      startAt: now + delay,     // everyone starts together
+      resumeAt: null,          // used after NO
+      audioPosition: 0,        // optional, seconds
+      firstBuzz: null,
+      lockedOut: [],
     };
 
-    io.emit("state", { ...state, gameCode, gameActive });
+    console.log("Grandprix started:", audioUrl);
+    emitState();
   });
 
+  // -----------------------------
+  // ADMIN: GRANDPRIX YES
+  // awards point to firstBuzz team and ends challenge
+  // -----------------------------
+  socket.on("grandprixYes", () => {
+    const ch = state.currentChallenge;
+    if (!ch || typeof ch === "string") return;
+    if (ch.type !== "Nisse Grandprix") return;
+
+    if (ch.firstBuzz?.teamId) {
+      const t = findTeamById(ch.firstBuzz.teamId);
+      if (t) t.points += 1;
+    }
+
+    ch.phase = "ended";
+    emitState();
+  });
+
+  // -----------------------------
+  // ADMIN: GRANDPRIX NO
+  // payload: { audioPosition } (seconds) optional
+  // locks out that team, resumes listening
+  // -----------------------------
+  socket.on("grandprixNo", ({ audioPosition } = {}) => {
+    const ch = state.currentChallenge;
+    if (!ch || typeof ch === "string") return;
+    if (ch.type !== "Nisse Grandprix") return;
+
+    if (ch.firstBuzz?.teamId) {
+      ch.lockedOut.push(ch.firstBuzz.teamId);
+    }
+
+    ch.firstBuzz = null;
+    ch.phase = "listening";
+
+    // resume from where audio paused (if admin sends it)
+    if (typeof audioPosition === "number") {
+      ch.audioPosition = audioPosition;
+    }
+
+    // give everyone a tiny buffer before resuming
+    ch.resumeAt = Date.now() + 1000;
+
+    emitState();
+  });
+
+  // -----------------------------
+  // ADMIN: GRANDPRIX INCOMPLETE
+  // ends round without points
+  // -----------------------------
+  socket.on("grandprixIncomplete", () => {
+    const ch = state.currentChallenge;
+    if (!ch || typeof ch === "string") return;
+    if (ch.type !== "Nisse Grandprix") return;
+
+    ch.phase = "ended";
+    emitState();
+  });
+
+  // -----------------------------
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
 });
 
+// Root route (optional)
 app.get("/", (req, res) => {
   res.send("Xmas Challenge Server Running");
 });
 
+// Render-safe PORT binding
 const PORT = process.env.PORT || 3000;
-
 http.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
-
-
-
