@@ -8,7 +8,23 @@ import { renderGrandprix } from "./minigames/grandprix.js";
 // import { renderNisseUdfordringen } from "./minigames/nisse_udfordringen.js";
 
 // Connect to the same server that serves this page
-const socket = io();
+// Replace: const socket = io();
+// With:
+let socket = null;
+
+if (typeof io !== "undefined") {
+  socket = io();
+  console.log("Socket.IO connected (team page).");
+} else {
+  console.warn("Socket.IO not loaded yet. Using dummy socket.");
+
+  socket = {
+    emit: () => {},
+    on: () => {},
+    disconnected: true,
+  };
+}
+
 
 let joined = false;
 let joinedCode = null;
@@ -220,3 +236,4 @@ function renderChallenge(challenge) {
       break;
   }
 }
+
