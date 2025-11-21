@@ -1,184 +1,144 @@
-// Connect to the same origin server (no hardcoded URL)
+// Connect to the same server that serves this page
 const socket = io();
 
-let currentTeamName = null;
+let joined = false;
+let joinedCode = null;
+let myTeamName = null;
 
-// DOM references
-const teamNameInput = document.getElementById("teamNameInput");
-const joinBtn = document.getElementById("joinBtn");
-const teamNameDisplay = document.getElementById("teamNameDisplay");
+const codeInput = document.getElementById("codeInput");
+const codeBtn = document.getElementById("codeBtn");
+const nameRow = document.getElementById("nameRow");
+const nameInput = document.getElementById("nameInput");
+const nameBtn = document.getElementById("nameBtn");
+const joinMsg = document.getElementById("joinMsg");
 
+const codeDisplay = document.getElementById("codeDisplay");
+const teamListEl = document.getElementById("teamList");
+
+const challengeTitle = document.getElementById("challengeTitle");
 const challengeText = document.getElementById("challengeText");
-const challengeImage = document.getElementById("challengeImage");
 
 const buzzBtn = document.getElementById("buzzBtn");
 const statusEl = document.getElementById("status");
 
-const cardForm = document.getElementById("cardForm");
-const cardInput = document.getElementById("cardInput");
-const cardsList = document.getElementById("cardsList");
-
-const photoForm = document.getElementById("photoForm");
-const photoInput = document.getElementById("photoInput");
-const photosList = document.getElementById("photosList");
-
-const leaderboardBody = document.getElementById("leaderboardBody");
-
-// Join team
-joinBtn.addEventListener("click", () => {
-  const name = teamNameInput.value.trim();
-  if (!name) {
-    alert("Write a team name first.");
-    teamNameInput.focus();
-    return;
-  }
-
-  currentTeamName = name;
-  teamNameDisplay.textContent = currentTeamName;
-
-  socket.emit("joinTeam", currentTeamName);
-
-  // Enable actions once joined
-  buzzBtn.disabled = false;
-  statusEl.textContent = "Joined as " + currentTeamName;
+// ---- Step 1: enter code ----
+codeBtn.addEventListener("click", tryCode);
+codeInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") tryCode();
 });
 
-// Buzz
-buzzBtn.addEventListener("click", () => {
-  if (!currentTeamName) {
-    alert("Join a team first.");
+function tryCode() {
+  const code = codeInput.value.trim();
+  if (!code) {
+    joinMsg.textContent = "Skriv en code først.";
     return;
   }
+
+  joinedCode = code;
+  codeDisplay.textContent = code;
+  joinMsg.textContent = "Code accepteret. Skriv jeres teamnavn.";
+
+  nameRow.style.display = "flex";
+  nameInput.focus();
+}
+
+// ---- Step 2: enter team name + joinGame ----
+nameBtn.addEventListener("click", tryJoinTeam);
+nameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") tryJoinTeam();
+});
+
+function tryJoinTeam() {
+  if (!joinedCode) {
+    joinMsg.textContent = "Indtast code først.";
+    return;
+  }
+
+  const teamName = nameInput.value.trim();
+  if (!teamName) {
+    joinMsg.textContent = "Skriv et teamnavn.";
+    return;
+  }
+
+  socket.emit("joinGame", { code: joinedCode, teamName }, (res) => {
+    if (!res?.ok) {
+      joinMsg.textContent = res?.message || "Kunne ikke joine.";
+      return;
+    }
+
+    joined = true;
+    myTeamName = res.team.name;
+
+    joinMsg.textContent = `✅ I er nu med som: ${myTeamName}`;
+    document.getElementById("joinSection").style.display = "none";
+
+    buzzBtn.disabled = false;
+  });
+}
+
+// ---- Receive global state ----
+socket.on("state", (serverState) => {
+  if (!serverState) return;
+
+  // Show the real game code if server sends it
+  if (serverState.gameCode) {
+    codeDisplay.textContent = serverState.gameCode;
+  }
+
+  renderLeaderboard(serverState.teams || []);
+  renderChallenge(serverState.currentChallenge);
+});
+
+// ---- Buzz feedback ----
+buzzBtn.addEventListener("click", () => {
+  if (!joined) return;
   socket.emit("buzz");
 });
 
-// Submit text card
-cardForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  if (!currentTeamName) {
-    alert("Join a team first.");
-    return;
-  }
-  const text = cardInput.value.trim();
-  if (!text) return;
-
-  socket.emit("submitCard", text);
-  cardInput.value = "";
+socket.on("buzzed", (teamName) => {
+  statusEl.textContent = `${teamName} buzzed først!`;
 });
 
-// Submit photo
-photoForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  if (!currentTeamName) {
-    alert("Join a team first.");
-    return;
-  }
-  const file = photoInput.files[0];
-  if (!file) {
-    alert("Choose a file first.");
-    return;
-  }
+// ---- Render helpers ----
+function renderLeaderboard(teams) {
+  // Sort by points desc then name
+  const sorted = [...teams].sort((a, b) => {
+    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
+    return (a.name || "").localeCompare(b.name || "");
+  });
 
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
+  teamListEl.innerHTML = "";
 
-    const res = await fetch("/upload", {
-      method: "POST",
-      body: formData,
-    });
+  sorted.forEach((t, i) => {
+    const li = document.createElement("li");
+    li.className = "team-item";
 
-    const data = await res.json();
-    // filename returned by server.js
-    socket.emit("submitPhoto", data.filename);
+    const left = document.createElement("span");
+    left.textContent = `${i + 1}. ${t.name}`;
 
-    photoInput.value = "";
-  } catch (err) {
-    console.error("Upload error:", err);
-    alert("Upload failed.");
-  }
-});
+    const right = document.createElement("span");
+    right.className = "pts";
+    right.textContent = t.points ?? 0;
 
-// Receive full state on connect / update
-socket.on("state", (state) => {
-  renderChallenge(state.currentChallenge);
-  renderLeaderboard(state.leaderboard);
-});
+    li.appendChild(left);
+    li.appendChild(right);
 
-// Someone buzzed
-socket.on("buzzed", (team) => {
-  statusEl.textContent = `${team} buzzed first!`;
-});
-
-// New text card from any team
-socket.on("newCard", ({ team, text }) => {
-  const li = document.createElement("li");
-  li.textContent = `${team}: ${text}`;
-  cardsList.appendChild(li);
-});
-
-// New photo from any team
-socket.on("newPhoto", ({ team, file }) => {
-  const li = document.createElement("li");
-  li.textContent = `${team}:`;
-  const img = document.createElement("img");
-  img.src = `/uploads/${file}`;
-  img.alt = `Photo from ${team}`;
-  li.appendChild(img);
-  photosList.appendChild(li);
-});
-
-// Voting event (if you later use it)
-socket.on("voteUpdate", ({ voter, index }) => {
-  console.log("Vote from", voter, "on index", index);
-  // You can add some UI feedback here later
-});
+    teamListEl.appendChild(li);
+  });
+}
 
 function renderChallenge(challenge) {
   if (!challenge) {
-    challengeText.textContent = "No challenge yet.";
-    challengeImage.style.display = "none";
-    challengeImage.src = "";
+    challengeTitle.textContent = "Ingen udfordring endnu";
+    challengeText.textContent = "Vent på læreren…";
     return;
   }
 
-  // Support both a simple string and an object { text, image }
   if (typeof challenge === "string") {
-    challengeText.textContent = challenge;
-    challengeImage.style.display = "none";
-    challengeImage.src = "";
+    challengeTitle.textContent = challenge;
+    challengeText.textContent = "Se instruktioner på skærmen.";
   } else {
-    challengeText.textContent = challenge.text || "New challenge!";
-    if (challenge.image) {
-      challengeImage.src = `/uploads/${challenge.image}`;
-      challengeImage.style.display = "block";
-    } else {
-      challengeImage.style.display = "none";
-      challengeImage.src = "";
-    }
+    challengeTitle.textContent = challenge.type || "Ny udfordring!";
+    challengeText.textContent = challenge.text || "Se instruktioner på skærmen.";
   }
-}
-
-function renderLeaderboard(leaderboard = []) {
-  leaderboardBody.innerHTML = "";
-
-  leaderboard.forEach((entry, index) => {
-    const tr = document.createElement("tr");
-
-    const rankTd = document.createElement("td");
-    rankTd.textContent = index + 1;
-
-    const nameTd = document.createElement("td");
-    // Adjust these property names if your structure is different
-    nameTd.textContent = entry.team || entry.name || "Unknown";
-
-    const pointsTd = document.createElement("td");
-    pointsTd.textContent = entry.points ?? entry.score ?? 0;
-
-    tr.appendChild(rankTd);
-    tr.appendChild(nameTd);
-    tr.appendChild(pointsTd);
-
-    leaderboardBody.appendChild(tr);
-  });
 }
