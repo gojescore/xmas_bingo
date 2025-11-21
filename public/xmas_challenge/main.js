@@ -28,14 +28,15 @@ const incompleteBtn = document.getElementById("incompleteBtn");
 const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
+const resetBtn = document.getElementById("resetBtn"); // 🔁 Nulstil-knappen
+
+// ✅ NEW: Start game + show code
 const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-const resetBtn = document.getElementById("resetBtn"); // 🔁 Nulstil-knappen
-
 // --- Local state (mirrors server state) ---
 let teams = [];
-let nextTeamId = 1;
+let nextTeamId = 1; // still used for local sorting/selection
 let selectedTeamId = null;
 let currentChallengeType = null;
 
@@ -59,23 +60,6 @@ function saveStateToLocal() {
   }
 }
 
-function handleStartGame() {
-  if (!socket || socket.disconnected) {
-    alert("Ingen forbindelse til serveren.");
-    return;
-  }
-
-  socket.emit("startGame", (res) => {
-    if (!res?.ok) {
-      alert("Kunne ikke starte spillet.");
-      return;
-    }
-    gameCodeValueEl.textContent = res.gameCode;
-    endGameResultEl.textContent = "";
-  });
-}
-
-
 function loadStateFromLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -83,6 +67,7 @@ function loadStateFromLocal() {
     const state = JSON.parse(raw);
     if (state && Array.isArray(state.teams)) {
       teams = state.teams;
+
       if (typeof state.nextTeamId === "number") {
         nextTeamId = state.nextTeamId;
       } else {
@@ -92,6 +77,7 @@ function loadStateFromLocal() {
         );
         nextTeamId = maxId + 1;
       }
+
       currentChallengeType =
         state.currentChallengeType === undefined
           ? null
@@ -110,22 +96,14 @@ function updateCurrentChallengeTextOnly() {
 }
 
 // --- Sync to server (real-time) ---
+// ✅ IMPORTANT: teams are now SERVER-OWNED, so admin does NOT send teams anymore.
 function syncToServer() {
-  if (!socket || typeof socket.emit !== "function" || socket.disconnected) return;
+  if (!socket || typeof socket.emit !== "function" || socket.disconnected) {
+    return;
+  }
 
   const serverState = {
-    // teams are NOT sent from admin anymore
-    leaderboard: [], 
-    currentChallenge: currentChallengeType,
-  };
-
-  socket.emit("updateState", serverState);
-}
-
-
-  const serverState = {
-    teams,
-    leaderboard: [], // can be used later if needed
+    leaderboard: [], // reserved for later
     currentChallenge: currentChallengeType,
   };
 
@@ -188,7 +166,35 @@ function renderTeams() {
   });
 }
 
+// -----------------------------
+// ADMIN: START GLOBAL GAME
+// -----------------------------
+function handleStartGame() {
+  if (!socket || socket.disconnected) {
+    alert("Ingen forbindelse til serveren.");
+    return;
+  }
+
+  socket.emit("startGame", (res) => {
+    if (!res?.ok) {
+      alert("Kunne ikke starte spillet.");
+      return;
+    }
+    gameCodeValueEl.textContent = res.gameCode;
+
+    // local UI reset (server also reset already)
+    teams = [];
+    selectedTeamId = null;
+    currentChallengeType = null;
+    endGameResultEl.textContent = "";
+    saveStateToLocal();
+    renderTeams();
+    updateCurrentChallengeTextOnly();
+  });
+}
+
 // --- Team management ---
+// ✅ Manual add uses server joinGame so uniqueness is enforced globally.
 function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -204,7 +210,6 @@ function addTeam(name) {
     return;
   }
 
-  // Use server uniqueness rules by joining as a team from admin
   socket.emit("joinGame", { code, teamName: trimmed }, (res) => {
     if (!res?.ok) {
       alert(res?.message || "Kunne ikke tilføje hold.");
@@ -213,22 +218,11 @@ function addTeam(name) {
 
     teamNameInput.value = "";
     teamNameInput.focus();
-    // state will come back via socket.on("state")
+    // teams list will update via server "state"
   });
 }
 
-
-  selectedTeamId = null;
-  teamNameInput.value = "";
-  saveStateToLocal();
-  renderTeams();
-  syncToServer();
-  // focus input again so you can quickly add next team
-  teamNameInput.focus();
-}
-
 function changePoints(teamId, delta) {
-  // Prevent rapid double clicks while leaderboard is moving
   if (isPointsCooldown) return;
 
   const team = teams.find((t) => t.id === teamId);
@@ -242,7 +236,7 @@ function changePoints(teamId, delta) {
   isPointsCooldown = true;
   setTimeout(() => {
     isPointsCooldown = false;
-  }, 500); // 0.5 seconds cooldown
+  }, 500);
 }
 
 function setCurrentChallenge(type) {
@@ -357,6 +351,10 @@ incompleteBtn.addEventListener("click", handleIncomplete);
 endGameBtn.addEventListener("click", handleEndGame);
 resetBtn.addEventListener("click", handleReset);
 
+if (startGameBtn) {
+  startGameBtn.addEventListener("click", handleStartGame);
+}
+
 // --- Socket.IO: Receive state from server (if available) ---
 if (socket && typeof socket.on === "function") {
   socket.on("connect", () => {
@@ -365,10 +363,14 @@ if (socket && typeof socket.on === "function") {
 
   socket.on("state", (serverState) => {
     console.log("Received state from server:", serverState);
-
     if (!serverState) return;
 
-    // Use server's version as truth
+    // ✅ NEW — show game code when server sends it
+    if (serverState.gameCode) {
+      gameCodeValueEl.textContent = serverState.gameCode;
+    }
+
+    // Use server's version as truth for teams
     if (Array.isArray(serverState.teams)) {
       teams = serverState.teams;
     } else {
@@ -387,9 +389,7 @@ if (socket && typeof socket.on === "function") {
     );
     nextTeamId = maxId + 1;
 
-    // Save server state locally just for backup/preload
     saveStateToLocal();
-
     renderTeams();
     updateCurrentChallengeTextOnly();
   });
@@ -400,7 +400,3 @@ loadStateFromLocal();
 renderTeams();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
-startGameBtn.addEventListener("click", handleStartGame);
-
-
-
