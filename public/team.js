@@ -1,4 +1,11 @@
 // Connect to the same server that serves this page
+import { renderGrandprix } from "./minigames/grandprix.js";
+import { renderFiNisse } from "./minigames/finisse.js";
+import { renderNisseGaaden } from "./minigames/nissegaaden.js";
+import { renderJuleKortet } from "./minigames/julekortet.js";
+import { renderNisseUdfordringen } from "./minigames/nisse_udfordringen.js";
+
+
 const socket = io();
 
 let joined = false;
@@ -155,5 +162,6 @@ function renderChallenge(challenge) {
     buzzBtn.disabled = false;
   }
 }
+
 
 
