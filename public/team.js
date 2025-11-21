@@ -28,6 +28,21 @@ const challengeText = document.getElementById("challengeText");
 const buzzBtn = document.getElementById("buzzBtn");
 const statusEl = document.getElementById("status");
 
+const api = {
+  setBuzzEnabled(enabled) {
+    buzzBtn.disabled = !enabled;
+  },
+
+  showStatus(text) {
+    statusEl.textContent = text;
+  },
+
+  clearMiniGame() {
+    statusEl.textContent = "";
+    buzzBtn.disabled = true;
+  }
+};
+
 // ---- Step 1: enter code ----
 codeBtn.addEventListener("click", tryCode);
 codeInput.addEventListener("keydown", (e) => {
@@ -146,15 +161,32 @@ function renderChallenge(challenge) {
 
   let type = null;
 
-  if (typeof challenge === "string") {
-    type = challenge;
-    challengeTitle.textContent = challenge;
-    challengeText.textContent = "Se instruktioner på skærmen.";
-  } else {
-    type = challenge.type || "Ny udfordring!";
-    challengeTitle.textContent = type;
-    challengeText.textContent = challenge.text || "Se instruktioner på skærmen.";
-  }
+ switch (type) {
+  case "Nisse Grandprix":
+    renderGrandprix(challenge, api);
+    break;
+
+  case "FiNisse":
+    renderFiNisse(challenge, api);
+    break;
+
+  case "NisseGåden":
+    renderNisseGaaden(challenge, api);
+    break;
+
+  case "JuleKortet":
+    renderJuleKortet(challenge, api);
+    break;
+
+  case "Nisse-udfordringen":
+    renderNisseUdfordringen(challenge, api);
+    break;
+
+  default:
+    api.clearMiniGame();
+    break;
+}
+
 
   // ✅ Only allow buzz in specific challenges
   const buzzAllowedTypes = ["Nisse Grandprix"];
@@ -162,6 +194,7 @@ function renderChallenge(challenge) {
     buzzBtn.disabled = false;
   }
 }
+
 
 
 
