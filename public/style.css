@@ -69,6 +69,20 @@ body {
   font-size: 1rem;
 }
 
+body.nissegaaden-mode #challengeTitle {
+  font-size: clamp(2.2rem, 4vw, 3.4rem);
+  font-weight: 900;
+  text-align: center;
+}
+
+body.nissegaaden-mode #challengeText {
+  font-size: clamp(2.4rem, 4.5vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+  margin-top: 12px;
+}
+
 .game-code-box {
   display: flex;
   flex-direction: column;
@@ -356,4 +370,5 @@ body {
   }
 
 }
+
 
