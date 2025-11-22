@@ -1,23 +1,19 @@
-// public/team.js (EVENT-SAFE: Grandprix NO mic, teams type answer)
+// public/team.js (RESTORED event-safe team)
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 
 const socket = io();
 
 function el(id) {
-  const node = document.getElementById(id);
-  if (!node) console.warn(`Missing element with id="${id}" in team.html`);
-  return node;
+  return document.getElementById(id);
 }
 
 // DOM
 const codeInput = el("codeInput");
 const codeBtn = el("codeBtn");
-
 const nameRow = el("nameRow");
 const nameInput = el("nameInput");
 const nameBtn = el("nameBtn");
-
 const joinMsg = el("joinMsg");
 const joinSection = el("joinSection");
 
@@ -31,11 +27,11 @@ const buzzBtn = el("buzzBtn");
 const statusEl = el("status");
 const teamNameLabel = el("teamNameLabel");
 
-// Grandprix answer popup
+// Grandprix popup
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
 
-// NEW: input for typed answer when locked
+// Typed answer UI
 let gpAnswerInput = null;
 let gpAnswerBtn = null;
 
@@ -43,15 +39,18 @@ function ensureAnswerUI() {
   if (gpAnswerInput) return;
 
   const wrap = document.createElement("div");
-  wrap.style.cssText = "margin-top:12px; display:flex; gap:8px; justify-content:center;";
+  wrap.style.cssText =
+    "margin-top:12px; display:flex; gap:8px; justify-content:center;";
 
   gpAnswerInput = document.createElement("input");
   gpAnswerInput.placeholder = "Skriv jeres svar her…";
-  gpAnswerInput.style.cssText = "font-size:1.1rem; padding:8px; width:260px;";
+  gpAnswerInput.style.cssText =
+    "font-size:1.1rem; padding:8px; width:260px;";
 
   gpAnswerBtn = document.createElement("button");
   gpAnswerBtn.textContent = "Send svar";
-  gpAnswerBtn.style.cssText = "font-size:1.1rem; padding:8px 12px; font-weight:700; cursor:pointer;";
+  gpAnswerBtn.style.cssText =
+    "font-size:1.1rem; padding:8px 12px; font-weight:700; cursor:pointer;";
 
   gpAnswerBtn.onclick = () => {
     const text = (gpAnswerInput.value || "").trim();
@@ -61,10 +60,7 @@ function ensureAnswerUI() {
     statusEl.textContent = "✅ Svar sendt til læreren.";
   };
 
-  wrap.appendChild(gpAnswerInput);
-  wrap.appendChild(gpAnswerBtn);
-
-  // place under buzz button
+  wrap.append(gpAnswerInput, gpAnswerBtn);
   buzzBtn.parentElement.appendChild(wrap);
 }
 
@@ -76,79 +72,71 @@ let myTeamName = null;
 // Mini-game API
 const api = {
   setBuzzEnabled(enabled) {
-    if (buzzBtn) buzzBtn.disabled = !enabled;
+    buzzBtn.disabled = !enabled;
   },
   showStatus(text) {
-    if (statusEl) statusEl.textContent = text;
+    statusEl.textContent = text;
   },
   clearMiniGame() {
-    if (statusEl) statusEl.textContent = "";
-    if (buzzBtn) buzzBtn.disabled = true;
+    statusEl.textContent = "";
+    buzzBtn.disabled = true;
     if (gpAnswerInput) gpAnswerInput.disabled = true;
     if (gpAnswerBtn) gpAnswerBtn.disabled = true;
   }
 };
 
-// ---- Join step 1: code ----
-codeBtn?.addEventListener("click", tryCode);
-codeInput?.addEventListener("keydown", (e) => {
+// ---- Join step 1 ----
+codeBtn.addEventListener("click", tryCode);
+codeInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") tryCode();
 });
 
 function tryCode() {
-  const code = (codeInput?.value || "").trim();
+  const code = codeInput.value.trim();
   if (!code) {
-    if (joinMsg) joinMsg.textContent = "Skriv en kode først.";
+    joinMsg.textContent = "Skriv en kode først.";
     return;
   }
 
   joinedCode = code;
-  if (codeDisplay) codeDisplay.textContent = code;
-  if (joinMsg) joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
+  codeDisplay.textContent = code;
+  joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
 
-  if (nameRow) nameRow.style.display = "flex";
-  nameInput?.focus();
+  nameRow.style.display = "flex";
+  nameInput.focus();
 }
 
-// ---- Join step 2: team name ----
-nameBtn?.addEventListener("click", tryJoinTeam);
-nameInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") tryJoinTeam();
+// ---- Join step 2 ----
+nameBtn.addEventListener("click", tryJoin);
+nameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") tryJoin();
 });
 
-function tryJoinTeam() {
-  if (!joinedCode) {
-    if (joinMsg) joinMsg.textContent = "Indtast kode først.";
+function tryJoin() {
+  const name = nameInput.value.trim();
+  if (!name) {
+    joinMsg.textContent = "Skriv et teamnavn.";
     return;
   }
 
-  const teamName = (nameInput?.value || "").trim();
-  if (!teamName) {
-    if (joinMsg) joinMsg.textContent = "Skriv et teamnavn.";
-    return;
-  }
-
-  socket.emit("joinGame", { code: joinedCode, teamName }, (res) => {
+  socket.emit("joinGame", { code: joinedCode, teamName: name }, (res) => {
     if (!res?.ok) {
-      if (joinMsg) joinMsg.textContent = res?.message || "Kunne ikke joine.";
+      joinMsg.textContent = res?.message || "Kunne ikke joine.";
       return;
     }
 
     joined = true;
     myTeamName = res.team.name;
+    teamNameLabel.textContent = myTeamName;
 
-    if (joinMsg) joinMsg.textContent = `✅ I er nu med som: ${myTeamName}`;
-    if (teamNameLabel) teamNameLabel.textContent = myTeamName;
-
-    if (joinSection) joinSection.style.display = "none";
-
-    api.clearMiniGame();
+    joinSection.style.display = "none";
     ensureAnswerUI();
+    api.clearMiniGame();
   });
 }
 
 // ---- Buzz ----
-buzzBtn?.addEventListener("click", () => {
+buzzBtn.addEventListener("click", () => {
   if (!joined) return;
 
   let audioPosition = null;
@@ -159,21 +147,15 @@ buzzBtn?.addEventListener("click", () => {
   socket.emit("buzz", { audioPosition });
 });
 
-socket.on("buzzed", (teamName) => {
-  if (statusEl) statusEl.textContent = `${teamName} buzzede først!`;
-});
-
-// Admin forced stop
+// stop audio forced
 socket.on("gp-stop-audio-now", () => {
   stopGrandprix();
   api.clearMiniGame();
   if (gpPopup) gpPopup.style.display = "none";
 });
 
-// ---- Leaderboard ----
+// leaderboard
 function renderLeaderboard(teams) {
-  if (!teamListEl) return;
-
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
@@ -191,31 +173,7 @@ function renderLeaderboard(teams) {
   });
 }
 
-// ---- Challenge render ----
-function renderChallenge(challenge) {
-  buzzBtn && (buzzBtn.disabled = true);
-
-  if (!challenge) {
-    stopGrandprix();
-    if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
-    if (challengeText) challengeText.textContent = "Vent på læreren…";
-    api.clearMiniGame();
-    return;
-  }
-
-  if (challengeTitle) challengeTitle.textContent = challenge.type || "Udfordring";
-  if (challengeText) challengeText.textContent = challenge.text || "";
-
-  if (challenge.type === "Nisse Grandprix") {
-    renderGrandprix(challenge, api);
-    return;
-  }
-
-  stopGrandprix();
-  api.clearMiniGame();
-}
-
-// ---- 5-sec Grandprix answer popup ----
+// --- GP popup countdown ---
 let gpPopupTimer = null;
 
 function showGrandprixPopup(startAtMs, seconds) {
@@ -224,7 +182,7 @@ function showGrandprixPopup(startAtMs, seconds) {
 
   gpPopup.style.display = "flex";
 
-  function tick() {
+  const tick = () => {
     const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
     const left = Math.max(0, seconds - elapsed);
     gpPopupCountdown.textContent = left;
@@ -233,47 +191,62 @@ function showGrandprixPopup(startAtMs, seconds) {
       clearInterval(gpPopupTimer);
       setTimeout(() => (gpPopup.style.display = "none"), 400);
     }
-  }
+  };
 
   tick();
   gpPopupTimer = setInterval(tick, 100);
 }
 
-// ---- State from server ----
+// challenge render
+function renderChallenge(ch) {
+  buzzBtn.disabled = true;
+
+  if (!ch) {
+    stopGrandprix();
+    challengeTitle.textContent = "Ingen udfordring endnu";
+    challengeText.textContent = "Vent på læreren…";
+    api.clearMiniGame();
+    return;
+  }
+
+  challengeTitle.textContent = ch.type || "Udfordring";
+  challengeText.textContent = ch.text || "";
+
+  if (ch.type === "Nisse Grandprix") {
+    renderGrandprix(ch, api);
+    return;
+  }
+
+  stopGrandprix();
+  api.clearMiniGame();
+}
+
+// state
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (s.gameCode && codeDisplay) codeDisplay.textContent = s.gameCode;
-
+  if (s.gameCode) codeDisplay.textContent = s.gameCode;
   renderLeaderboard(s.teams || []);
   renderChallenge(s.currentChallenge);
 
   const ch = s.currentChallenge;
-
-  const isLockedGrandprix =
+  const isLockedGP =
     ch &&
     ch.type === "Nisse Grandprix" &&
     ch.phase === "locked";
 
-  // enable typed answer only for buzzing team during lock
-  if (gpAnswerInput && gpAnswerBtn) {
-    const iAmBuzzedFirst =
-      joined &&
-      isLockedGrandprix &&
-      ch.firstBuzz &&
-      ch.firstBuzz.teamName === myTeamName;
+  const iAmBuzzedFirst =
+    joined &&
+    isLockedGP &&
+    ch.firstBuzz &&
+    ch.firstBuzz.teamName === myTeamName;
 
+  if (gpAnswerInput && gpAnswerBtn) {
     gpAnswerInput.disabled = !iAmBuzzedFirst;
     gpAnswerBtn.disabled = !iAmBuzzedFirst;
   }
 
-  if (
-    joined &&
-    isLockedGrandprix &&
-    ch.firstBuzz &&
-    ch.firstBuzz.teamName === myTeamName &&
-    ch.countdownStartAt
-  ) {
+  if (iAmBuzzedFirst && ch.countdownStartAt) {
     showGrandprixPopup(ch.countdownStartAt, ch.countdownSeconds || 5);
   } else {
     if (gpPopup) gpPopup.style.display = "none";
