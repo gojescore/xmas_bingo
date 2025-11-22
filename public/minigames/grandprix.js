@@ -1,8 +1,4 @@
-// public/minigames/grandprix.js
-// Phase rules expected from admin:
-// - "listening"  => audio plays, buzz enabled
-// - "locked"     => someone buzzed, audio paused, buzz disabled
-// - "ended"      => stop everything
+// public/minigames/grandprix.js v2
 
 let audio = null;
 
@@ -14,7 +10,7 @@ export function stopGrandprix() {
   window.__grandprixAudio = null;
 }
 
-export function renderGrandprix(ch, api, socket) {
+export function renderGrandprix(ch, api) {
   const url = ch.audioUrl;
   if (!url) {
     api.showStatus("⚠️ Ingen lyd-URL fundet.");
@@ -23,7 +19,6 @@ export function renderGrandprix(ch, api, socket) {
     return;
   }
 
-  // create audio once
   if (!audio || audio.src !== url) {
     stopGrandprix();
     audio = new Audio(url);
@@ -31,12 +26,10 @@ export function renderGrandprix(ch, api, socket) {
     window.__grandprixAudio = audio;
   }
 
-  // LISTENING: play + buzz ON
   if (ch.phase === "listening") {
     api.setBuzzEnabled(true);
     api.showStatus("");
 
-    // start when admin says startAt (sync point)
     const startAt = ch.startAt || Date.now();
     const waitMs = Math.max(0, startAt - Date.now());
 
@@ -44,21 +37,19 @@ export function renderGrandprix(ch, api, socket) {
       try {
         await audio.play();
       } catch {
-        api.showStatus("⚠️ Kunne ikke starte lyd. Tryk BUZZ for at starte.");
+        api.showStatus("⚠️ Tryk BUZZ for at starte lyd.");
       }
     }, waitMs);
 
     return;
   }
 
-  // LOCKED: pause + buzz OFF
   if (ch.phase === "locked") {
     api.setBuzzEnabled(false);
     try { audio.pause(); } catch {}
     return;
   }
 
-  // ENDED / anything else
   api.setBuzzEnabled(false);
   stopGrandprix();
 }
