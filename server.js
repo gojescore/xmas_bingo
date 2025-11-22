@@ -7,10 +7,8 @@ const fs = require("fs");
 const path = require("path");
 
 // -----------------------------
-// FILES / STATIC
+// STATIC / UPLOADS
 // -----------------------------
-
-// Create uploads folder if missing
 if (!fs.existsSync("./uploads")) {
   fs.mkdirSync("./uploads");
 }
@@ -18,7 +16,6 @@ if (!fs.existsSync("./uploads")) {
 app.use(express.static("public"));
 app.use("/uploads", express.static("uploads"));
 
-// Multer for image uploads
 const upload = multer({ dest: "./uploads/" });
 
 app.post("/upload", upload.single("file"), (req, res) => {
@@ -28,31 +25,61 @@ app.post("/upload", upload.single("file"), (req, res) => {
 // -----------------------------
 // GAME STATE
 // -----------------------------
-
 function makeGameCode() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
 let state = {
   gameCode: null,
-  teams: [], // [{id,name,points}]
-  leaderboard: [], // not used yet but kept for future
-  currentChallenge: null, // string or object {type, phase, ...}
+  teams: [],
+  leaderboard: [],
+  // NEW: deck of cards
+  challengeDeck: [],
+  // current challenge can be string or object
+  currentChallenge: null,
+  currentChallengeId: null, // NEW: tracks which deck card is active
 };
 
 let nextTeamId = 1;
 
-// Helper: broadcast full state
 function emitState() {
   io.emit("state", state);
 }
 
-// Helper: find team by id or name
 function findTeamById(id) {
   return state.teams.find(t => t.id === id);
 }
+
 function findTeamByName(name) {
   return state.teams.find(t => t.name.toLowerCase() === name.toLowerCase());
+}
+
+function findDeckItemById(id) {
+  return state.challengeDeck.find(c => c.id === id);
+}
+
+function markDeckUsed(id) {
+  const item = findDeckItemById(id);
+  if (item) item.used = true;
+}
+
+// Helper: start Grandprix from a deck item
+function startGrandprixFromDeck(item) {
+  const delay = 2000;
+  const now = Date.now();
+
+  state.currentChallenge = {
+    id: item.id,
+    type: "Nisse Grandprix",
+    phase: "listening",
+    audioUrl: item.audioUrl,
+    startAt: now + delay,
+    resumeAt: null,
+    audioPosition: 0,
+    firstBuzz: null,
+    lockedOut: [],
+  };
+  state.currentChallengeId = item.id;
 }
 
 // -----------------------------
@@ -60,26 +87,24 @@ function findTeamByName(name) {
 // -----------------------------
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
-
-  // Send current state to anyone who connects
   socket.emit("state", state);
 
-  // -----------------------------
-  // ADMIN: START NEW GAME
-  // -----------------------------
+  // ADMIN: start new game -> create code, reset teams + deck used flags
   socket.on("startGame", () => {
     state.gameCode = makeGameCode();
     state.teams = [];
     nextTeamId = 1;
     state.currentChallenge = null;
+    state.currentChallengeId = null;
+
+    // reset deck used flags
+    state.challengeDeck = state.challengeDeck.map(c => ({ ...c, used: false }));
 
     console.log("Game started. Code:", state.gameCode);
     emitState();
   });
 
-  // -----------------------------
-  // TEAM: JOIN GAME BY CODE + NAME
-  // -----------------------------
+  // TEAM: join by code + unique name
   socket.on("joinGame", ({ code, teamName }, ack) => {
     try {
       const cleanCode = (code || "").trim();
@@ -119,91 +144,84 @@ io.on("connection", (socket) => {
     }
   });
 
-  // -----------------------------
-  // BASIC BUZZ (used by Grandprix)
-  // -----------------------------
+  // ADMIN: send whole deck to server (initial or updates)
+  socket.on("setDeck", (deck) => {
+    if (!Array.isArray(deck)) return;
+    state.challengeDeck = deck;
+    emitState();
+  });
+
+  // ADMIN: start a deck challenge by id
+  socket.on("startChallenge", (challengeId) => {
+    const id = Number(challengeId);
+    const item = findDeckItemById(id);
+    if (!item || item.used) return;
+
+    if (item.type === "Nisse Grandprix") {
+      if (!item.audioUrl) return;
+      startGrandprixFromDeck(item);
+      emitState();
+      return;
+    }
+
+    // Normal challenges: just broadcast the item as current challenge
+    state.currentChallenge = {
+      id: item.id,
+      type: item.type,
+      title: item.title || item.type,
+      text: item.text || "",
+      imageUrl: item.imageUrl || null,
+    };
+    state.currentChallengeId = item.id;
+
+    emitState();
+  });
+
+  // BASIC buzz for Grandprix
   socket.on("buzz", () => {
     const teamId = socket.teamId;
     const teamName = socket.teamName;
-
     if (!teamId || !teamName) return;
 
     const ch = state.currentChallenge;
-
-    // Only handle buzz in Nisse Grandprix listening phase
-    if (!ch || (typeof ch === "string")) return;
+    if (!ch || typeof ch !== "object") return;
     if (ch.type !== "Nisse Grandprix") return;
     if (ch.phase !== "listening") return;
 
-    // If team already locked out for this round, ignore
     if (Array.isArray(ch.lockedOut) && ch.lockedOut.includes(teamId)) {
       socket.emit("buzzRejected", { reason: "lockedOut" });
       return;
     }
 
-    // If someone already buzzed first, ignore
     if (ch.firstBuzz) {
       socket.emit("buzzRejected", { reason: "tooLate" });
       return;
     }
 
-    // FIRST BUZZ WINS
     ch.firstBuzz = { teamId, teamName, at: Date.now() };
     ch.phase = "locked";
 
-    console.log("First buzz:", teamName);
-
-    io.emit("buzzed", teamName);  // UI feedback
+    io.emit("buzzed", teamName);
     emitState();
   });
 
-  // -----------------------------
-  // ADMIN: SET CHALLENGE (GENERIC)
-  // If your admin already uses updateState,
-  // this keeps working.
-  // -----------------------------
+  // ADMIN: generic state update (kept for future)
   socket.on("updateState", (newState) => {
-    // Keep gameCode safe if admin forgets to send it
     const safeCode = state.gameCode;
+    const safeDeck = state.challengeDeck;
 
     state = newState || state;
+
     if (!state.gameCode) state.gameCode = safeCode;
+    if (!Array.isArray(state.challengeDeck)) state.challengeDeck = safeDeck;
 
     emitState();
   });
 
-  // -----------------------------
-  // ADMIN: START GRANDPRIX (distributed audio)
-  // payload: { audioUrl, startDelayMs=2000 }
-  // -----------------------------
-  socket.on("startGrandprix", ({ audioUrl, startDelayMs } = {}) => {
-    if (!audioUrl) return;
-
-    const delay = typeof startDelayMs === "number" ? startDelayMs : 2000;
-    const now = Date.now();
-
-    state.currentChallenge = {
-      type: "Nisse Grandprix",
-      phase: "listening",
-      audioUrl,
-      startAt: now + delay,     // everyone starts together
-      resumeAt: null,          // used after NO
-      audioPosition: 0,        // optional, seconds
-      firstBuzz: null,
-      lockedOut: [],
-    };
-
-    console.log("Grandprix started:", audioUrl);
-    emitState();
-  });
-
-  // -----------------------------
-  // ADMIN: GRANDPRIX YES
-  // awards point to firstBuzz team and ends challenge
-  // -----------------------------
+  // GRANDPRIX YES -> award + end + mark deck used
   socket.on("grandprixYes", () => {
     const ch = state.currentChallenge;
-    if (!ch || typeof ch === "string") return;
+    if (!ch || typeof ch !== "object") return;
     if (ch.type !== "Nisse Grandprix") return;
 
     if (ch.firstBuzz?.teamId) {
@@ -212,17 +230,16 @@ io.on("connection", (socket) => {
     }
 
     ch.phase = "ended";
+    if (state.currentChallengeId != null) {
+      markDeckUsed(state.currentChallengeId);
+    }
     emitState();
   });
 
-  // -----------------------------
-  // ADMIN: GRANDPRIX NO
-  // payload: { audioPosition } (seconds) optional
-  // locks out that team, resumes listening
-  // -----------------------------
+  // GRANDPRIX NO -> lock out buzzer team + resume
   socket.on("grandprixNo", ({ audioPosition } = {}) => {
     const ch = state.currentChallenge;
-    if (!ch || typeof ch === "string") return;
+    if (!ch || typeof ch !== "object") return;
     if (ch.type !== "Nisse Grandprix") return;
 
     if (ch.firstBuzz?.teamId) {
@@ -232,42 +249,37 @@ io.on("connection", (socket) => {
     ch.firstBuzz = null;
     ch.phase = "listening";
 
-    // resume from where audio paused (if admin sends it)
     if (typeof audioPosition === "number") {
       ch.audioPosition = audioPosition;
     }
 
-    // give everyone a tiny buffer before resuming
     ch.resumeAt = Date.now() + 1000;
-
     emitState();
   });
 
-  // -----------------------------
-  // ADMIN: GRANDPRIX INCOMPLETE
-  // ends round without points
-  // -----------------------------
+  // GRANDPRIX INCOMPLETE -> end without points + mark used
   socket.on("grandprixIncomplete", () => {
     const ch = state.currentChallenge;
-    if (!ch || typeof ch === "string") return;
+    if (!ch || typeof ch !== "object") return;
     if (ch.type !== "Nisse Grandprix") return;
 
     ch.phase = "ended";
+    if (state.currentChallengeId != null) {
+      markDeckUsed(state.currentChallengeId);
+    }
     emitState();
   });
 
-  // -----------------------------
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
   });
 });
 
-// Root route (optional)
+// Root route
 app.get("/", (req, res) => {
   res.send("Xmas Challenge Server Running");
 });
 
-// Render-safe PORT binding
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log("Server listening on port", PORT);
