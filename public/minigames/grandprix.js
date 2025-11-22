@@ -1,84 +1,64 @@
 // public/minigames/grandprix.js
-// Phase-aware Grandprix: never restarts audio on lock, only enables buzz in listening.
+// Phase rules expected from admin:
+// - "listening"  => audio plays, buzz enabled
+// - "locked"     => someone buzzed, audio paused, buzz disabled
+// - "ended"      => stop everything
 
 let audio = null;
-let lastUrl = null;
-let startTimer = null;
-let starting = false;
-
-function ensureAudio(url) {
-  if (!audio) {
-    audio = new Audio();
-    audio.preload = "auto";
-    window.__grandprixAudio = audio; // for buzz position, if you want it
-  }
-  if (url && url !== lastUrl) {
-    audio.src = url;
-    lastUrl = url;
-  }
-  return audio;
-}
-
-function clearTimers() {
-  if (startTimer) clearTimeout(startTimer);
-  startTimer = null;
-  starting = false;
-}
 
 export function stopGrandprix() {
-  clearTimers();
   if (audio) {
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-    } catch {}
+    try { audio.pause(); } catch {}
+    audio = null;
   }
+  window.__grandprixAudio = null;
 }
 
-export function renderGrandprix(challenge, api) {
-  const url = challenge.audioUrl || challenge.url || "";
-
-  // Always stop / disable buzz if not listening
-  if (challenge.phase !== "listening") {
-    stopGrandprix();
+export function renderGrandprix(ch, api, socket) {
+  const url = ch.audioUrl;
+  if (!url) {
+    api.showStatus("⚠️ Ingen lyd-URL fundet.");
     api.setBuzzEnabled(false);
-    api.showStatus("");
+    stopGrandprix();
     return;
   }
 
-  // LISTENING PHASE
-  const a = ensureAudio(url);
+  // create audio once
+  if (!audio || audio.src !== url) {
+    stopGrandprix();
+    audio = new Audio(url);
+    audio.preload = "auto";
+    window.__grandprixAudio = audio;
+  }
 
-  api.setBuzzEnabled(false); // re-enable only when actually playing
-
-  // If already playing, do NOTHING (important!)
-  if (!a.paused && !starting) {
+  // LISTENING: play + buzz ON
+  if (ch.phase === "listening") {
     api.setBuzzEnabled(true);
+    api.showStatus("");
+
+    // start when admin says startAt (sync point)
+    const startAt = ch.startAt || Date.now();
+    const waitMs = Math.max(0, startAt - Date.now());
+
+    setTimeout(async () => {
+      try {
+        await audio.play();
+      } catch {
+        api.showStatus("⚠️ Kunne ikke starte lyd. Tryk BUZZ for at starte.");
+      }
+    }, waitMs);
+
     return;
   }
 
-  // Start at shared startAt (3 sec pre-countdown already in admin)
-  clearTimers();
-  starting = true;
+  // LOCKED: pause + buzz OFF
+  if (ch.phase === "locked") {
+    api.setBuzzEnabled(false);
+    try { audio.pause(); } catch {}
+    return;
+  }
 
-  const delay = Math.max(0, (challenge.startAt || Date.now()) - Date.now());
-
-  api.showStatus("🎵 Musik starter om lidt…");
-
-  startTimer = setTimeout(async () => {
-    try {
-      await a.play();     // may be blocked until user gesture
-      api.showStatus("");
-      api.setBuzzEnabled(true);
-    } catch (e) {
-      // Autoplay blocked → show a simple banner button
-      api.showStatus("👉 Tryk på BUZZ-knappen én gang for at starte lyden.");
-      api.setBuzzEnabled(true); // allow first click to also start play
-    } finally {
-      starting = false;
-    }
-  }, delay);
-
-  // If they click buzz while autoplay blocked, attempt play once
-  // (team.js buzz click triggers play because buzz is enabled)
+  // ENDED / anything else
+  api.setBuzzEnabled(false);
+  stopGrandprix();
 }
