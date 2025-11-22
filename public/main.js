@@ -1,4 +1,4 @@
-// public/main.js (EVENT-SAFE: dynamic deck imports + GP always stops)
+// public/main.js (v17 EVENT BULLETPROOF: deck can't disappear)
 
 const socket = (typeof io !== "undefined") ? io() : {
   emit() {},
@@ -25,9 +25,9 @@ const resetBtn = document.getElementById("resetBtn");
 const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-console.log("✅ main.js booted");
+console.log("✅ main.js booted v17");
 
-// ---------------- Countdown element on main ----------------
+// ---------------- Main countdown element ----------------
 let mainCountdownEl = null;
 function ensureMainCountdownEl() {
   if (mainCountdownEl) return mainCountdownEl;
@@ -50,28 +50,68 @@ let deck = [];
 let gameCode = null;
 
 let isPointsCooldown = false;
-const STORAGE_KEY = "xmasChallengeState_eventsafe_v1";
+const STORAGE_KEY = "xmasChallengeState_eventsafe_v2";
 
-// ---------------- Safe deck loader (no crash if missing files) ----------------
+// ---------------- Fallback deck (never empty) ----------------
+const FALLBACK_DECK = [
+  {
+    id: "gp_fallback_1",
+    type: "Nisse Grandprix",
+    title: "Grandprix (fallback)",
+    audioUrl: "", // you can paste a URL later
+    used: false
+  },
+  {
+    id: "ng_fallback_1",
+    type: "NisseGåden",
+    title: "NisseGåden (fallback)",
+    text: "Fallback gåde – udskift mig.",
+    used: false
+  }
+];
+
+// ---------------- Safe deck loader ----------------
 async function loadDeckSafely() {
   let grandprixDeck = [];
   let nisseGaaden = [];
 
   try {
     const gp = await import("./data/deck/grandprix.js");
-    grandprixDeck = gp.grandprixDeck || [];
+    // accept multiple export names
+    grandprixDeck =
+      gp.grandprixDeck ||
+      gp.grandPrixDeck ||
+      gp.deck ||
+      gp.default ||
+      [];
   } catch (e) {
     console.warn("⚠️ Could not load grandprix deck:", e);
   }
 
   try {
     const ng = await import("./data/deck/nissegaaden.js");
-    nisseGaaden = ng.nisseGaaden || [];
+    // accept multiple export names
+    nisseGaaden =
+      ng.nisseGaaden ||
+      ng.nissegaaden ||
+      ng.nisseGaadenDeck ||
+      ng.deck ||
+      ng.default ||
+      [];
   } catch (e) {
     console.warn("⚠️ Could not load nissegaaden deck:", e);
   }
 
-  deck = [...grandprixDeck, ...nisseGaaden].map(c => ({ ...c, used: !!c.used }));
+  deck = [...grandprixDeck, ...nisseGaaden]
+    .filter(Boolean)
+    .map(c => ({ ...c, used: !!c.used }));
+
+  // If still empty, fall back
+  if (deck.length === 0) {
+    console.error("❌ Deck empty -> using FALLBACK_DECK");
+    deck = FALLBACK_DECK.map(c => ({ ...c }));
+  }
+
   renderDeck();
 }
 
@@ -144,6 +184,14 @@ function renderDeck() {
   if (!challengeGridEl) return;
   challengeGridEl.innerHTML = "";
 
+  if (!deck.length) {
+    const warn = document.createElement("div");
+    warn.textContent = "⚠️ Ingen udfordringer fundet (deck tom).";
+    warn.style.cssText = "padding:12px; font-weight:900; color:crimson;";
+    challengeGridEl.appendChild(warn);
+    return;
+  }
+
   deck.forEach(card => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
@@ -163,7 +211,7 @@ function renderDeck() {
   });
 }
 
-// ---------------- Main countdown ----------------
+// ---------------- Countdown ----------------
 let mainCountdownTimer = null;
 
 function renderCurrentChallenge() {
@@ -252,7 +300,7 @@ function changePoints(teamId, delta) {
 // ---------------- Challenge selection ----------------
 function setCurrentChallenge(card) {
   if (card.type === "Nisse Grandprix") {
-    const startDelayMs = 3000; // synced pre-countdown
+    const startDelayMs = 3000;
     currentChallenge = {
       ...card,
       phase: "listening",
@@ -269,14 +317,12 @@ function setCurrentChallenge(card) {
   syncToServer();
 }
 
-// Mark used
 function markCurrentUsed() {
   if (!currentChallenge) return;
   const idx = deck.findIndex(c => c.id === currentChallenge.id);
   if (idx >= 0) deck[idx].used = true;
 }
 
-// End current challenge
 function endCurrentChallenge() {
   if (!currentChallenge) return;
   if (currentChallenge.type === "Nisse Grandprix") {
@@ -286,7 +332,7 @@ function endCurrentChallenge() {
   }
 }
 
-// ✅ Decisions: END GP FIRST, then sync ONCE (guaranteed stop audio)
+// decisions: end GP first, then sync once
 function handleYes() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
@@ -319,12 +365,11 @@ function handleIncomplete() {
   renderDeck(); renderCurrentChallenge(); saveLocal(); syncToServer();
 }
 
-// Reset all
+// reset
 function handleReset() {
   const sure = confirm("Nulstil hele spillet?");
   if (!sure) return;
 
-  // end GP first so stop signal is sent
   if (currentChallenge?.type === "Nisse Grandprix") {
     currentChallenge = { ...currentChallenge, phase: "ended" };
   }
@@ -344,7 +389,7 @@ function handleReset() {
   syncToServer();
 }
 
-// End game
+// end game
 function handleEndGame() {
   if (!teams.length) return alert("Ingen hold endnu.");
 
@@ -363,7 +408,7 @@ function handleEndGame() {
   }
 }
 
-// Start game (server truth only)
+// start game
 function handleStartGame() {
   startGameBtn.disabled = true;
 
@@ -387,7 +432,7 @@ function handleStartGame() {
   });
 }
 
-// ---------------- Listeners ----------------
+// listeners
 addTeamBtn?.addEventListener("click", () => addTeam(teamNameInput.value));
 teamNameInput?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") addTeam(teamNameInput.value);
@@ -401,7 +446,7 @@ resetBtn?.addEventListener("click", handleReset);
 endGameBtn?.addEventListener("click", handleEndGame);
 startGameBtn?.addEventListener("click", handleStartGame);
 
-// ---------------- Socket events ----------------
+// socket state
 socket.on("state", (s) => {
   if (!s) return;
 
@@ -425,7 +470,7 @@ socket.on("buzzed", (teamName) => {
   if (t) { selectedTeamId = t.id; renderTeams(); }
 });
 
-// ---------------- Init ----------------
+// init
 loadLocal();
 renderTeams();
 renderCurrentChallenge();
