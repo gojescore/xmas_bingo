@@ -204,9 +204,29 @@ body {
 
 .challenge-controls {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 6px;
+  flex-wrap: wrap;
 }
+
+/* Bigger, clearer buttons */
+.challenge-controls button {
+  font-size: 1.3rem;
+  padding: 14px 22px;
+  border-radius: 14px;
+  font-weight: 800;
+}
+
+/* Countdown styling to match row */
+.gp-countdown {
+  min-width: 48px;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 900;
+  color: #111;
+}
+
 
 .challenge-controls .yes {
   background: linear-gradient(135deg, #4caf50, #2e7d32);
@@ -316,4 +336,5 @@ body {
   .layout {
     grid-template-columns: 1fr;
   }
+
 }
