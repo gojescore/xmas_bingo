@@ -290,8 +290,18 @@ function handleReset() {
 }
 
 function handleStartGame() {
+  // Reset local deck "used" flags
+  challengeDeck = challengeDeck.map(c => ({ ...c, used: false }));
+  saveStateToLocal();
+  renderDeck();
+
+  // Start new game on server
   socket.emit("startGame");
+
+  // Re-send deck to server (important if server deck was empty)
+  socket.emit("setDeck", challengeDeck);
 }
+
 
 function handleEndGame() {
   if (teams.length === 0) return alert("Ingen hold endnu.");
@@ -386,6 +396,11 @@ socket.on("state", (s) => {
   if (Array.isArray(s.challengeDeck)) {
     challengeDeck = s.challengeDeck;
   }
+// If server has no deck (e.g. after restart), push ours up again
+if (!challengeDeck.length) {
+  challengeDeck = makeInitialDeck();
+  socket.emit("setDeck", challengeDeck);
+}
 
   const maxId = teams.reduce((m, t) => Math.max(m, t.id || 0), 0);
   nextTeamId = maxId + 1;
@@ -436,4 +451,5 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
+
 
