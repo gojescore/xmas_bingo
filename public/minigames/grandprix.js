@@ -1,8 +1,15 @@
-// public/minigames/grandprix.js v2
+// public/minigames/grandprix.js v3
+// Fix: clear pending play timers so audio reliably resumes after NO.
 
 let audio = null;
+let playTimeout = null;
 
 export function stopGrandprix() {
+  if (playTimeout) {
+    clearTimeout(playTimeout);
+    playTimeout = null;
+  }
+
   if (audio) {
     try { audio.pause(); } catch {}
     audio = null;
@@ -12,6 +19,7 @@ export function stopGrandprix() {
 
 export function renderGrandprix(ch, api) {
   const url = ch.audioUrl;
+
   if (!url) {
     api.showStatus("⚠️ Ingen lyd-URL fundet.");
     api.setBuzzEnabled(false);
@@ -19,11 +27,18 @@ export function renderGrandprix(ch, api) {
     return;
   }
 
+  // If URL changed, rebuild audio cleanly
   if (!audio || audio.src !== url) {
     stopGrandprix();
     audio = new Audio(url);
     audio.preload = "auto";
     window.__grandprixAudio = audio;
+  }
+
+  // Always cancel any pending play when state changes
+  if (playTimeout) {
+    clearTimeout(playTimeout);
+    playTimeout = null;
   }
 
   if (ch.phase === "listening") {
@@ -33,7 +48,8 @@ export function renderGrandprix(ch, api) {
     const startAt = ch.startAt || Date.now();
     const waitMs = Math.max(0, startAt - Date.now());
 
-    setTimeout(async () => {
+    playTimeout = setTimeout(async () => {
+      playTimeout = null;
       try {
         await audio.play();
       } catch {
@@ -50,6 +66,7 @@ export function renderGrandprix(ch, api) {
     return;
   }
 
+  // ended / null etc.
   api.setBuzzEnabled(false);
   stopGrandprix();
 }
