@@ -1,3 +1,5 @@
+// server.js (FULL) — v31 hardened for Grandprix + NisseGåden + JuleKortet
+
 const express = require("express");
 const app = express();
 const http = require("http").createServer(app);
@@ -6,124 +8,205 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 
-// uploads for FiNisse later
-if (!fs.existsSync("./uploads")) fs.mkdirSync("./uploads");
+// Create uploads folder if missing
+if (!fs.existsSync("./uploads")) {
+  fs.mkdirSync("./uploads");
+}
 
 app.use(express.static("public"));
 app.use("/uploads", express.static("uploads"));
 
-// PUBLIC state (sent to all clients)
-let state = {
-  teams: [],
-  deck: [],
-  currentChallenge: null,
-  gameCode: null,
-};
+// -----------------------------
+// Games by code
+// -----------------------------
+const games = {}; // { [code]: { teams, deck, currentChallenge, gameCode } }
 
-// PRIVATE store (never sent)
-const privateStore = {
-  julekortet: new Map(), // challengeId -> [{ teamName, text }]
-};
+function getEmptyState(code) {
+  return {
+    teams: [],
+    deck: [],
+    currentChallenge: null,
+    gameCode: code || null,
+  };
+}
 
+// Multer for image uploads
 const upload = multer({ dest: "./uploads/" });
+
 app.post("/upload", upload.single("file"), (req, res) => {
   res.json({ filename: req.file.filename });
 });
 
+// -----------------------------
+// SOCKET.IO
+// -----------------------------
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
 
-  socket.emit("state", state);
+  // helper to get socket's game
+  function getGame() {
+    if (!socket.gameCode) return null;
+    return games[socket.gameCode] || null;
+  }
 
-  socket.on("joinTeam", (teamName) => {
-    socket.team = teamName;
-  });
+  // Send empty/default state on connect
+  socket.emit("state", getEmptyState(null));
 
-  // Teams join by code + name (callback)
+  // -----------------------------
+  // JOIN GAME (teams)
+  // -----------------------------
   socket.on("joinGame", ({ code, teamName }, cb) => {
-    if (!state.gameCode || code !== state.gameCode) {
+    code = String(code || "").trim();
+    teamName = String(teamName || "").trim();
+
+    if (!code || !teamName) {
+      cb?.({ ok: false, message: "Manglende kode eller navn." });
+      return;
+    }
+
+    if (!games[code]) {
       cb?.({ ok: false, message: "Forkert kode" });
       return;
     }
 
-    if (!teamName?.trim()) {
-      cb?.({ ok: false, message: "Ugyldigt navn" });
-      return;
-    }
+    const state = games[code];
 
+    // Unique name check
     const exists = state.teams.some(
-      (t) => t.name.toLowerCase() === teamName.toLowerCase()
+      (t) => (t.name || "").toLowerCase() === teamName.toLowerCase()
     );
     if (exists) {
-      cb?.({ ok: false, message: "Navnet findes allerede" });
+      cb?.({ ok: false, message: "Holdnavn findes allerede." });
       return;
     }
 
+    // Add team to state
     const team = {
       id: "t" + Date.now() + Math.random(),
-      name: teamName.trim(),
+      name: teamName,
       points: 0,
     };
-
     state.teams.push(team);
-    io.emit("state", state);
 
-    console.log("Team joined:", teamName);
+    // Attach to socket
+    socket.gameCode = code;
+    socket.team = teamName;
+
+    // Join room for this game
+    socket.join(code);
+
+    console.log("Team joined:", teamName, "in game", code);
+
+    // Notify everyone in game
+    io.to(code).emit("state", state);
+
     cb?.({ ok: true, team });
   });
 
-  // BUZZ (Grandprix)
-  socket.on("buzz", (payload) => {
-    io.emit("buzzed", socket.team, payload);
+  // -----------------------------
+  // ADMIN updates whole state
+  // -----------------------------
+  socket.on("updateState", (newState) => {
+    const code = String(newState?.gameCode || "").trim();
+    if (!code) return;
+
+    if (!games[code]) games[code] = getEmptyState(code);
+
+    games[code] = {
+      ...games[code],
+      ...newState,
+      gameCode: code,
+    };
+
+    socket.gameCode = code;
+    socket.join(code);
+
+    io.to(code).emit("state", games[code]);
   });
 
-  // TEXT SUBMISSION (JuleKortet + NisseGåden)
-  socket.on("submitCard", (text) => {
-    const ch = state.currentChallenge;
+  // -----------------------------
+  // BUZZ (Grandprix)
+  // -----------------------------
+  socket.on("buzz", () => {
+    const state = getGame();
+    if (!state) return;
 
-    if (ch?.type === "JuleKortet" && ch.phase === "writing") {
-      // public cards (anonymous)
-      ch.cards = ch.cards || [];
-      ch.cards.push({ text });
+    io.to(socket.gameCode).emit("buzzed", socket.team);
+  });
 
-      // private cards (with team)
-      const key = ch.id;
-      if (!privateStore.julekortet.has(key)) privateStore.julekortet.set(key, []);
-      privateStore.julekortet.get(key).push({ teamName: socket.team, text });
+  // -----------------------------
+  // TYPED ANSWER (Grandprix)
+  // -----------------------------
+  socket.on("gp-typed-answer", (payload) => {
+    const state = getGame();
+    if (!state) return;
 
-      io.emit("state", state);
-      return;
+    const teamName = payload?.teamName || socket.team;
+    const text = payload?.text;
+
+    if (!teamName || typeof text !== "string") return;
+
+    io.to(socket.gameCode).emit("gp-typed-answer", { teamName, text });
+  });
+
+  // -----------------------------
+  // STOP GP AUDIO everywhere
+  // -----------------------------
+  socket.on("gp-stop-audio-now", () => {
+    const state = getGame();
+    if (!state) return;
+
+    io.to(socket.gameCode).emit("gp-stop-audio-now");
+  });
+
+  // -----------------------------
+  // SUBMIT CARD (NisseGåden / JuleKortet)
+  // Accepts string OR {teamName,text}
+  // -----------------------------
+  socket.on("submitCard", (payload) => {
+    const state = getGame();
+    if (!state) return;
+
+    let teamName = socket.team;
+    let text = "";
+
+    if (typeof payload === "string") {
+      text = payload;
+    } else if (payload && typeof payload === "object") {
+      teamName = payload.teamName || payload.team || socket.team;
+      text = payload.text || "";
     }
 
-    // default (NisseGåden etc)
-    io.emit("newCard", { team: socket.team, text });
+    text = String(text).trim();
+    if (!text) return;
+
+    io.to(socket.gameCode).emit("newCard", { teamName, text });
   });
 
-  // VOTE (JuleKortet voting)
+  // -----------------------------
+  // SUBMIT PHOTO (unused now)
+  // -----------------------------
+  socket.on("submitPhoto", (file) => {
+    const state = getGame();
+    if (!state) return;
+
+    io.to(socket.gameCode).emit("newPhoto", {
+      teamName: socket.team,
+      file,
+    });
+  });
+
+  // -----------------------------
+  // VOTE (FiNisse / JuleKortet)
+  // -----------------------------
   socket.on("vote", (index) => {
-    const ch = state.currentChallenge;
-    if (ch?.type !== "JuleKortet" || ch.phase !== "voting") return;
+    const state = getGame();
+    if (!state) return;
 
-    ch.votes = ch.votes || {}; // voterTeam -> index
-
-    // only one vote per team; overwrite allowed
-    ch.votes[socket.team] = index;
-
-    io.emit("state", state);
-    io.emit("voteUpdate", { voter: socket.team, index });
-  });
-
-  // Admin updates state
-  socket.on("updateState", (newState) => {
-    state = newState;
-    io.emit("state", state);
-  });
-
-  // Admin asks: who wrote winning card?
-  socket.on("jk-request-winner-team", ({ challengeId, cardIndex }, cb) => {
-    const priv = privateStore.julekortet.get(challengeId) || [];
-    const winner = priv[cardIndex];
-    cb?.(winner ? { ok: true, teamName: winner.teamName } : { ok: false });
+    io.to(socket.gameCode).emit("voteUpdate", {
+      voter: socket.team,
+      index,
+    });
   });
 
   socket.on("disconnect", () => {
@@ -131,10 +214,13 @@ io.on("connection", (socket) => {
   });
 });
 
+// Basic root response
 app.get("/", (req, res) => {
   res.send("Xmas Challenge Server Running");
 });
 
-http.listen(process.env.PORT || 3000, () => {
-  console.log("Server listening");
+const PORT = process.env.PORT || 3000;
+
+http.listen(PORT, () => {
+  console.log("Server listening on port", PORT);
 });
