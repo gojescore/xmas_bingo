@@ -1,34 +1,32 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="da">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Main Control</title>
-  <!-- very important: CSS file in the SAME folder -->
-  <link rel="stylesheet" href="style.css?v=2" />
-
+  <link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
   <div class="app">
     <header class="app-header">
-  <div class="header-main">
-    <h1>🎄 Xmas Challenge – Game Master</h1>
-    <p>Opret hold, vælg udfordringer og styr pointene.</p>
-  </div>
+      <div class="header-main">
+        <h1>🎄 Xmas Challenge – Game Master</h1>
+        <p>Opret hold, vælg udfordringer og styr pointene.</p>
+      </div>
+
       <div class="game-code-box">
-  <button id="startGameBtn" class="start-game-btn">▶ Start Xmas Challenge</button>
-  <div id="gameCodeDisplay" class="game-code-display">
-    Game code: <span id="gameCodeValue">—</span>
-  </div>
-</div>
+        <button id="startGameBtn" class="start-game-btn">▶ Start Xmas Challenge</button>
+        <div id="gameCodeDisplay" class="game-code-display">
+          Game code: <span id="gameCodeValue">—</span>
+        </div>
+      </div>
 
-  <button id="resetBtn" class="reset-btn">🔁 Nulstil</button>
-</header>
-
+      <button id="resetBtn" class="reset-btn">🔁 Nulstil</button>
+    </header>
 
     <main class="layout">
-      <!-- LEFT: challenges + current challenge -->
       <section class="main-panel">
+
         <div class="teams-setup">
           <h2>Hold</h2>
           <div class="team-form">
@@ -39,6 +37,7 @@
 
         <div class="challenge-picker">
           <h2>Udfordringer</h2>
+          <!-- Deck cards injected here -->
           <div class="challenge-grid"></div>
         </div>
 
@@ -52,6 +51,12 @@
             <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
           </div>
 
+          <!-- Countdown + mic audio -->
+          <div id="grandprixAdminRow" style="display:flex; align-items:center; gap:12px; margin-top:8px;">
+            <div id="grandprixCountdown" style="font-size:1.6rem; font-weight:900;"></div>
+            <audio id="grandprixRemoteAudio" autoplay></audio>
+          </div>
+
           <p class="hint">
             Klik på et hold til højre for at markere vinderen, og tryk derefter “Ja”.
           </p>
@@ -61,31 +66,18 @@
           <button id="endGameBtn" class="end-game">🏁 Afslut spil</button>
           <p id="endGameResult" class="end-result"></p>
         </div>
+
       </section>
 
-      <!-- RIGHT: leaderboard -->
       <aside class="sidebar">
         <h2>Leaderboard</h2>
         <p class="sidebar-hint">Klik på et hold for at vælge det. Brug + / - for point.</p>
-        <ul id="teamList" class="team-list">
-          <!-- JS will fill this -->
-        </ul>
+        <ul id="teamList" class="team-list"></ul>
       </aside>
     </main>
   </div>
 
-  <!-- very important: JS file in the SAME folder -->
-  <!-- Socket.IO client (served by your Node server) -->
   <script src="/socket.io/socket.io.js"></script>
-
-  <!-- very important: JS file in the SAME folder -->
   <script src="main.js?v=7"></script>
 </body>
 </html>
-
-
-
-
-
-
-
