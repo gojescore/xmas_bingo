@@ -412,24 +412,33 @@ function handleEndGame() {
 
 // ---------------- Start Game (code) ----------------
 function handleStartGame() {
-  // Ask server if it supports startGame ack
-  let didAck = false;
+  // Don’t generate local codes anymore.
+  // Trust the server so we never get double codes.
+  startGameBtn.disabled = true;
 
   socket.emit("startGame", (res) => {
-    didAck = true;
-    if (res?.ok) {
-      gameCode = res.gameCode;
-      if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
-      if (res.state?.teams) teams = res.state.teams;
-      if (res.state?.deck) deck = res.state.deck;
-      currentChallenge = null;
-      renderTeams();
-      renderDeck();
-      renderCurrentChallenge();
-      saveLocal();
-      syncToServer();
+    if (!res?.ok) {
+      alert(res?.message || "Kunne ikke starte spillet. Prøv igen.");
+      startGameBtn.disabled = false;
+      return;
     }
+
+    gameCode = res.gameCode;
+    if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
+
+    if (res.state?.teams) teams = res.state.teams;
+    if (res.state?.deck) deck = res.state.deck;
+
+    currentChallenge = null;
+
+    renderTeams();
+    renderDeck();
+    renderCurrentChallenge();
+    saveLocal();
+    syncToServer();
   });
+}
+
 
   // Fallback if server doesn't ack
   setTimeout(() => {
@@ -490,3 +499,4 @@ renderDeck();
 renderCurrentChallenge();
 teamNameInput?.focus();
 if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
+
