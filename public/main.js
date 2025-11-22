@@ -416,6 +416,14 @@ socket.on("state", (serverState) => {
     challengeDeck = serverState.challengeDeck;
   }
 
+  // Show who buzzed first on admin
+socket.on("buzzed", (teamName) => {
+  // Simple visible feedback
+  currentChallengeText.textContent =
+    `⛔ ${teamName} buzzed først! Vent på svar…`;
+});
+
+
   const maxId = teams.reduce((m, t) => Math.max(m, t.id || 0), 0);
   nextTeamId = maxId + 1;
 
@@ -441,4 +449,5 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
+
 
