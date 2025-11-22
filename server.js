@@ -3,11 +3,6 @@ const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 
-const fs = require("fs");
-
-// ---------------------------
-// Serve static
-// ---------------------------
 app.use(express.static("public"));
 
 // ---------------------------
@@ -20,24 +15,38 @@ let state = {
   deck: []
 };
 
+// Helper: always compare codes as trimmed strings
+function normalizeCode(c) {
+  return String(c ?? "").trim();
+}
+
 // ---------------------------
 // Socket.io
 // ---------------------------
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
+  // Send current state on connect
   socket.emit("state", state);
 
   socket.on("joinGame", ({ code, teamName }, callback) => {
-    if (!state.gameCode || state.gameCode !== code) {
+    const serverCode = normalizeCode(state.gameCode);
+    const clientCode = normalizeCode(code);
+
+    if (!serverCode || serverCode !== clientCode) {
       return callback({ ok: false, message: "Forkert kode" });
     }
 
-    if (state.teams.find(t => t.name === teamName)) {
+    const cleanName = String(teamName ?? "").trim();
+    if (!cleanName) {
+      return callback({ ok: false, message: "Skriv et teamnavn" });
+    }
+
+    if (state.teams.find(t => t.name.toLowerCase() === cleanName.toLowerCase())) {
       return callback({ ok: false, message: "Navn findes allerede" });
     }
 
-    const team = { name: teamName, points: 0 };
+    const team = { name: cleanName, points: 0 };
     state.teams.push(team);
 
     io.emit("state", state);
@@ -45,7 +54,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("buzz", (info) => {
-    io.emit("buzzed", info);
+    io.emit("buzzed", info?.teamName || info);
   });
 
   socket.on("gp-stop-audio-now", () => {
@@ -53,6 +62,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("updateState", (newState) => {
+    // Admin is truth
     state = newState;
     io.emit("state", state);
   });
