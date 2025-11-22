@@ -1,279 +1,315 @@
-// ===============================
-//  Xmas Challenge – MAIN ADMIN JS
-// ===============================
+// public/main.js  (RESTORED event-safe admin)
 
 const socket = io();
 
-// -------------------------------
-// Persistent admin-side state
-// -------------------------------
-let state = null;
+// DOM
+const startGameBtn = document.getElementById("startGameBtn");
+const resetBtn = document.getElementById("resetBtn");
+const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-// Local deck (full list of all challenges)
+const teamNameInput = document.getElementById("teamNameInput");
+const addTeamBtn = document.getElementById("addTeamBtn");
+const teamListEl = document.getElementById("teamList");
+
+const currentChallengeText = document.getElementById("currentChallengeText");
+const yesBtn = document.getElementById("yesBtn");
+const noBtn = document.getElementById("noBtn");
+const incompleteBtn = document.getElementById("incompleteBtn");
+const endGameBtn = document.getElementById("endGameBtn");
+const endGameResultEl = document.getElementById("endGameResult");
+
+const challengeGridEl = document.querySelector(".challenge-grid");
+
+// STATE
+let teams = [];
+let selectedTeamId = null;
+let currentChallenge = null;
 let deck = [];
+let gameCode = null;
 
-// -------------------------------
-// FALLBACK deck
-// -------------------------------
-const FALLBACK_DECK = [
-  {
-    id: "gp1",
-    type: "Nisse Grandprix",
-    title: "Grandprix 1",
-    audioUrl: "",
-    used: false
-  },
-  {
-    id: "ng1",
-    type: "NisseGåden",
-    title: "NisseGåden 1",
-    text: "Fallback gåde...",
-    used: false
-  }
-];
+const STORAGE_KEY = "xmasChallenge_admin_v18";
 
-// -------------------------------
-// DOM GETTER
-// -------------------------------
-function el(id) {
-  const node = document.getElementById(id);
-  if (!node) console.warn(`Missing #${id}`);
-  return node;
-}
-
-// -------------------------------
-// DOM references
-// -------------------------------
-const startBtn = el("startGameBtn");
-const resetBtn = el("resetBtn");
-const gameCodeValueEl = el("gameCodeValue");
-
-const teamNameInput = el("teamNameInput");
-const addTeamBtn = el("addTeamBtn");
-
-const teamListEl = el("teamList");
-const currentChallengeText = el("currentChallengeText");
-
-const yesBtn = el("yesBtn");
-const noBtn = el("noBtn");
-const incompleteBtn = el("incompleteBtn");
-const endGameBtn = el("endGameBtn");
-const endGameResult = el("endGameResult");
-
-const challengeGrid = document.querySelector(".challenge-grid");
-
-// -------------------------------
-// Save & sync
-// -------------------------------
-function saveLocal() {
-  localStorage.setItem("adminState", JSON.stringify({ deck }));
-}
-
-function syncToServer() {
-  socket.emit("updateState", {
-    ...state,
-    deck
-  });
-}
-
-// -------------------------------
-// LOAD DECK FROM FILES
-// -------------------------------
+// ---- Load deck dynamically (won't crash) ----
 async function loadDeckSafely() {
   let grandprixDeck = [];
   let nisseGaaden = [];
 
   try {
     const gp = await import("./data/deck/grandprix.js?v=" + Date.now());
-    grandprixDeck =
-      gp.grandprixDeck || gp.deck || gp.default || [];
-  } catch (err) {
-    console.warn("⚠️ Could not load grandprix deck:", err);
+    grandprixDeck = gp.grandprixDeck || gp.deck || gp.default || [];
+  } catch (e) {
+    console.warn("Deck GP failed", e);
   }
 
   try {
     const ng = await import("./data/deck/nissegaaden.js?v=" + Date.now());
-    nisseGaaden =
-      ng.nisseGaaden || ng.deck || ng.default || [];
-  } catch (err) {
-    console.warn("⚠️ Could not load nissegaaden deck:", err);
+    nisseGaaden = ng.nisseGaaden || ng.deck || ng.default || [];
+  } catch (e) {
+    console.warn("Deck NG failed", e);
   }
 
-  deck = [...grandprixDeck, ...nisseGaaden]
-    .filter(Boolean)
-    .map(c => ({ ...c, used: !!c.used }));
-
-  if (deck.length === 0) {
-    console.error("❌ Deck empty -> using fallback");
-    deck = FALLBACK_DECK.map(c => ({ ...c }));
-  }
-
+  deck = [...grandprixDeck, ...nisseGaaden].map(c => ({ ...c, used: !!c.used }));
   renderDeck();
-
-  // IMPORTANT: push to server so it is never empty again
   saveLocal();
-  syncToServer();
+  syncToServer(); // publish deck so server isn't empty
 }
 
-// -------------------------------
-// RENDER DECK INTO CHALLENGE GRID
-// -------------------------------
+function saveLocal() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ teams, deck, currentChallenge, gameCode }));
+}
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (Array.isArray(s.teams)) teams = s.teams;
+    if (Array.isArray(s.deck)) deck = s.deck;
+    currentChallenge = s.currentChallenge || null;
+    gameCode = s.gameCode || null;
+  } catch {}
+}
+
+function syncToServer() {
+  socket.emit("updateState", { teams, deck, currentChallenge, gameCode });
+}
+
+// ---- Render deck boxes ----
 function renderDeck() {
-  if (!challengeGrid) return;
+  if (!challengeGridEl) return;
+  challengeGridEl.innerHTML = "";
 
-  challengeGrid.innerHTML = "";
-
-  if (!deck || deck.length === 0) {
-    const w = document.createElement("p");
-    w.style.color = "red";
-    w.style.fontWeight = "bold";
-    w.textContent = "⚠️ Ingen udfordringer fundet (deck tom)";
-    challengeGrid.appendChild(w);
-    return;
-  }
-
-  deck.forEach(ch => {
+  deck.forEach(card => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
+    btn.textContent = card.title || card.type;
 
-    if (ch.used) btn.classList.add("used");
+    if (card.used) {
+      btn.style.opacity = "0.45";
+      btn.style.textDecoration = "line-through";
+    }
 
-    btn.textContent = ch.title || ch.type;
+    btn.onclick = () => {
+      if (card.used) return alert("Denne udfordring er allerede brugt.");
 
-    btn.addEventListener("click", () => {
-      ch.used = true;
-      startChallenge(ch);
+      // mark used immediately
+      card.used = true;
+
+      // start challenge
+      if (card.type === "Nisse Grandprix") {
+        currentChallenge = {
+          ...card,
+          phase: "listening",
+          startAt: Date.now() + 3000, // 3 sec pre-countdown on teams
+          firstBuzz: null,
+          countdownSeconds: 5
+        };
+      } else {
+        currentChallenge = { ...card };
+      }
+
+      renderDeck();
+      renderCurrentChallenge();
       saveLocal();
       syncToServer();
-      renderDeck();
-    });
+    };
 
-    challengeGrid.appendChild(btn);
+    challengeGridEl.appendChild(btn);
   });
 }
 
-// -------------------------------
-// START A CHALLENGE
-// -------------------------------
-function startChallenge(challenge) {
-  state.currentChallenge = {
-    ...challenge,
-    phase: "listening",
-    startAt: Date.now()
-  };
+// ---- Render teams/leaderboard ----
+function renderTeams() {
+  const sorted = [...teams].sort((a, b) => {
+    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
+    return (a.name || "").localeCompare(b.name || "");
+  });
 
-  socket.emit("updateState", state);
+  teamListEl.innerHTML = "";
+
+  sorted.forEach(team => {
+    const li = document.createElement("li");
+    li.className = "team-item" + (team.id === selectedTeamId ? " selected" : "");
+
+    li.innerHTML = `
+      <span class="team-name">${team.name}</span>
+      <div class="team-points">
+        <button class="minus">−</button>
+        <span>${team.points ?? 0}</span>
+        <button class="plus">+</button>
+      </div>
+    `;
+
+    li.querySelector(".plus").onclick = (e) => {
+      e.stopPropagation();
+      team.points = (team.points ?? 0) + 1;
+      saveLocal(); renderTeams(); syncToServer();
+    };
+    li.querySelector(".minus").onclick = (e) => {
+      e.stopPropagation();
+      team.points = Math.max(0, (team.points ?? 0) - 1);
+      saveLocal(); renderTeams(); syncToServer();
+    };
+
+    li.onclick = () => {
+      selectedTeamId = team.id;
+      renderTeams();
+    };
+
+    teamListEl.appendChild(li);
+  });
 }
 
-// -------------------------------
-// TEAM MANAGEMENT
-// -------------------------------
+function renderCurrentChallenge() {
+  currentChallengeText.textContent = currentChallenge
+    ? `Aktuel udfordring: ${currentChallenge.title || currentChallenge.type}`
+    : "Ingen udfordring valgt endnu.";
+}
+
+// ---- Add team (admin manual) ----
 addTeamBtn.addEventListener("click", () => {
   const name = teamNameInput.value.trim();
   if (!name) return;
 
-  state.teams.push({ name, points: 0 });
-  teamNameInput.value = "";
+  if (teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+    alert("Navnet findes allerede.");
+    return;
+  }
 
+  teams.push({ id: "t" + Date.now() + Math.random(), name, points: 0 });
+  teamNameInput.value = "";
+  renderTeams();
+  saveLocal();
   syncToServer();
 });
 
-// -------------------------------
-// DECISION BUTTONS
-// -------------------------------
-function endGrandprixEarly() {
+// ---- Decisions (ALWAYS stop audio) ----
+function stopGpNow() {
   socket.emit("gp-stop-audio-now");
+  if (currentChallenge?.type === "Nisse Grandprix") {
+    currentChallenge = { ...currentChallenge, phase: "ended" };
+  } else {
+    currentChallenge = null;
+  }
 }
 
-yesBtn.addEventListener("click", () => {
-  endGrandprixEarly();
-  state.currentChallenge = null;
-  syncToServer();
-});
+yesBtn.onclick = () => {
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
+  if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
-noBtn.addEventListener("click", () => {
-  endGrandprixEarly();
-  state.currentChallenge = null;
-  syncToServer();
-});
+  stopGpNow();
 
-incompleteBtn.addEventListener("click", () => {
-  endGrandprixEarly();
-  state.currentChallenge = null;
-  syncToServer();
-});
+  const t = teams.find(x => x.id === selectedTeamId);
+  if (t) t.points = (t.points ?? 0) + 1;
 
-// -------------------------------
-// RESET GAME
-// -------------------------------
-resetBtn.addEventListener("click", () => {
-  state.currentChallenge = null;
-  state.teams = [];
-  deck.forEach(c => (c.used = false));
+  selectedTeamId = null;
 
+  renderTeams();
+  renderCurrentChallenge();
+  saveLocal();
   syncToServer();
+};
+
+noBtn.onclick = () => {
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
+  stopGpNow();
+  renderCurrentChallenge();
+  saveLocal();
+  syncToServer();
+};
+
+incompleteBtn.onclick = () => {
+  if (!currentChallenge) return alert("Vælg en udfordring først.");
+  stopGpNow();
+  renderCurrentChallenge();
+  saveLocal();
+  syncToServer();
+};
+
+// ---- Reset ----
+resetBtn.onclick = () => {
+  if (!confirm("Nulstil hele spillet?")) return;
+
+  stopGpNow();
+  teams = [];
+  selectedTeamId = null;
+  currentChallenge = null;
+  deck.forEach(c => c.used = false);
+
+  renderTeams();
   renderDeck();
-});
-
-// -------------------------------
-// END GAME
-// -------------------------------
-endGameBtn.addEventListener("click", () => {
-  if (!state || !state.teams.length) return;
-
-  const sorted = [...state.teams].sort((a, b) => b.points - a.points);
-  const winner = sorted[0];
-
-  endGameResult.textContent = `Vinderen er: ${winner.name}! 🎉`;
-
-  endGrandprixEarly();
-  state.currentChallenge = null;
+  renderCurrentChallenge();
+  saveLocal();
   syncToServer();
-});
+};
 
-// -------------------------------
-// START GAME (generate code)
-// -------------------------------
-startBtn.addEventListener("click", () => {
-  const code = Math.floor(1000 + Math.random() * 9000).toString();
-  state.gameCode = code;
-  gameCodeValueEl.textContent = code;
+// ---- End game ----
+endGameBtn.onclick = () => {
+  if (!teams.length) return alert("Ingen hold endnu.");
 
+  stopGpNow();
+
+  const sorted = [...teams].sort((a,b) => (b.points ?? 0) - (a.points ?? 0));
+  const top = sorted[0];
+  endGameResultEl.textContent = `Vinderen er: ${top.name} med ${top.points ?? 0} point! 🎉`;
+
+  renderCurrentChallenge();
+  saveLocal();
   syncToServer();
+};
+
+// ---- Start game (generate code) ----
+startGameBtn.onclick = () => {
+  gameCode = String(Math.floor(1000 + Math.random() * 9000));
+  gameCodeValueEl.textContent = gameCode;
+
+  saveLocal();
+  syncToServer();
+};
+
+// ---- Auto-select buzzing team + show typed answers ----
+socket.on("buzzed", (teamName) => {
+  const t = teams.find(x => x.name === teamName);
+  if (t) {
+    selectedTeamId = t.id;
+    renderTeams();
+  }
 });
 
-// -------------------------------
-// RECEIVE STATE FROM SERVER
-// -------------------------------
+socket.on("gp-typed-answer", ({ teamName, text }) => {
+  alert(`Svar fra ${teamName}:\n\n${text}`);
+});
+
+// ---- Receive state ----
 socket.on("state", (s) => {
   if (!s) return;
 
-  state = s;
+  if (Array.isArray(s.teams)) teams = s.teams;
 
-  if (state.gameCode) {
-    gameCodeValueEl.textContent = state.gameCode;
-  }
-
-  // IMPORTANT: don't let server overwrite with empty deck
+  // keep our local deck if server sends empty
   if (Array.isArray(s.deck)) {
     if (s.deck.length === 0 && deck.length > 0) {
-      console.warn("Ignored empty deck from server");
+      // ignore empty deck
     } else {
       deck = s.deck;
     }
   }
 
+  currentChallenge = s.currentChallenge || null;
+  gameCode = s.gameCode || gameCode;
+
+  if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
+
+  renderTeams();
   renderDeck();
+  renderCurrentChallenge();
+  saveLocal();
 });
 
-// -------------------------------
-// INIT
-// -------------------------------
-state = {
-  teams: [],
-  currentChallenge: null,
-  gameCode: null,
-  deck: []
-};
-
+// ---- INIT ----
+loadLocal();
+renderTeams();
+renderDeck();
+renderCurrentChallenge();
 loadDeckSafely();
+if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
