@@ -1,7 +1,4 @@
-// public/main.js (FIXED: single-sync decisions, GP audio always stops)
-
-import { grandprixDeck } from "./data/deck/grandprix.js";
-import { nisseGaaden } from "./data/deck/nissegaaden.js";
+// public/main.js (EVENT-SAFE: dynamic deck imports + GP always stops)
 
 const socket = (typeof io !== "undefined") ? io() : {
   emit() {},
@@ -9,7 +6,7 @@ const socket = (typeof io !== "undefined") ? io() : {
   disconnected: true
 };
 
-// DOM
+// ---------------- DOM ----------------
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
@@ -28,7 +25,9 @@ const resetBtn = document.getElementById("resetBtn");
 const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-// Countdown (main) – sits right of “ikke fuldført”
+console.log("✅ main.js booted");
+
+// ---------------- Countdown element on main ----------------
 let mainCountdownEl = null;
 function ensureMainCountdownEl() {
   if (mainCountdownEl) return mainCountdownEl;
@@ -43,25 +42,40 @@ function ensureMainCountdownEl() {
   return mainCountdownEl;
 }
 
-// STATE
+// ---------------- STATE ----------------
 let teams = [];
 let selectedTeamId = null;
 let currentChallenge = null;
-let deck = makeInitialDeck();
+let deck = [];
 let gameCode = null;
 
 let isPointsCooldown = false;
-const STORAGE_KEY = "xmasChallengeState_v5";
+const STORAGE_KEY = "xmasChallengeState_eventsafe_v1";
 
-// Initial deck from imports
-function makeInitialDeck() {
-  return [
-    ...grandprixDeck,
-    ...nisseGaaden,
-  ].map(c => ({ ...c, used: !!c.used }));
+// ---------------- Safe deck loader (no crash if missing files) ----------------
+async function loadDeckSafely() {
+  let grandprixDeck = [];
+  let nisseGaaden = [];
+
+  try {
+    const gp = await import("./data/deck/grandprix.js");
+    grandprixDeck = gp.grandprixDeck || [];
+  } catch (e) {
+    console.warn("⚠️ Could not load grandprix deck:", e);
+  }
+
+  try {
+    const ng = await import("./data/deck/nissegaaden.js");
+    nisseGaaden = ng.nisseGaaden || [];
+  } catch (e) {
+    console.warn("⚠️ Could not load nissegaaden deck:", e);
+  }
+
+  deck = [...grandprixDeck, ...nisseGaaden].map(c => ({ ...c, used: !!c.used }));
+  renderDeck();
 }
 
-// Local persistence
+// ---------------- Persistence ----------------
 function saveLocal() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -82,13 +96,13 @@ function loadLocal() {
   } catch {}
 }
 
-// Sync to server (admins are truth)
+// ---------------- Server sync ----------------
 function syncToServer() {
   if (!socket || socket.disconnected) return;
   socket.emit("updateState", { gameCode, teams, deck, currentChallenge });
 }
 
-// Render teams
+// ---------------- Rendering ----------------
 function renderTeams() {
   const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
@@ -96,7 +110,6 @@ function renderTeams() {
   });
 
   teamListEl.innerHTML = "";
-
   sorted.forEach(team => {
     const li = document.createElement("li");
     li.className = "team-item" + (team.id === selectedTeamId ? " selected" : "");
@@ -123,12 +136,10 @@ function renderTeams() {
     li.append(nameSpan, pointsDiv);
 
     li.onclick = () => { selectedTeamId = team.id; renderTeams(); };
-
     teamListEl.appendChild(li);
   });
 }
 
-// Render deck boxes
 function renderDeck() {
   if (!challengeGridEl) return;
   challengeGridEl.innerHTML = "";
@@ -152,8 +163,9 @@ function renderDeck() {
   });
 }
 
-// Main countdown render
+// ---------------- Main countdown ----------------
 let mainCountdownTimer = null;
+
 function renderCurrentChallenge() {
   if (!currentChallenge) {
     currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
@@ -200,7 +212,7 @@ function hideMainCountdown() {
   if (mainCountdownEl) mainCountdownEl.style.display = "none";
 }
 
-// Team management
+// ---------------- Teams ----------------
 function addTeam(name) {
   const trimmed = name.trim();
   if (!trimmed) return;
@@ -220,10 +232,8 @@ function addTeam(name) {
   saveLocal();
   renderTeams();
   syncToServer();
-  teamNameInput.focus();
 }
 
-// Normal +/- buttons can still sync instantly
 function changePoints(teamId, delta) {
   if (isPointsCooldown) return;
   const team = teams.find(t => t.id === teamId);
@@ -239,10 +249,10 @@ function changePoints(teamId, delta) {
   setTimeout(() => isPointsCooldown = false, 400);
 }
 
-// Set current challenge
+// ---------------- Challenge selection ----------------
 function setCurrentChallenge(card) {
   if (card.type === "Nisse Grandprix") {
-    const startDelayMs = 3000;
+    const startDelayMs = 3000; // synced pre-countdown
     currentChallenge = {
       ...card,
       phase: "listening",
@@ -259,7 +269,7 @@ function setCurrentChallenge(card) {
   syncToServer();
 }
 
-// Mark card used
+// Mark used
 function markCurrentUsed() {
   if (!currentChallenge) return;
   const idx = deck.findIndex(c => c.id === currentChallenge.id);
@@ -276,19 +286,16 @@ function endCurrentChallenge() {
   }
 }
 
-// ✅ FIXED DECISIONS (single sync AFTER GP ended)
+// ✅ Decisions: END GP FIRST, then sync ONCE (guaranteed stop audio)
 function handleYes() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
-  // 1) End GP FIRST so server triggers stop-audio-now
   endCurrentChallenge();
 
-  // 2) Then award point locally (no premature sync)
   const team = teams.find(t => t.id === selectedTeamId);
   if (team) team.points = (team.points ?? 0) + 1;
 
-  // 3) Mark used and sync once
   markCurrentUsed();
 
   renderTeams();
@@ -300,34 +307,24 @@ function handleYes() {
 
 function handleNo() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
-
   endCurrentChallenge();
   markCurrentUsed();
-
-  renderDeck();
-  renderCurrentChallenge();
-  saveLocal();
-  syncToServer();
+  renderDeck(); renderCurrentChallenge(); saveLocal(); syncToServer();
 }
 
 function handleIncomplete() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
-
   endCurrentChallenge();
   markCurrentUsed();
-
-  renderDeck();
-  renderCurrentChallenge();
-  saveLocal();
-  syncToServer();
+  renderDeck(); renderCurrentChallenge(); saveLocal(); syncToServer();
 }
 
 // Reset all
 function handleReset() {
-  const sure = confirm("Nulstil hele spillet? (hold, point og udfordringer)");
+  const sure = confirm("Nulstil hele spillet?");
   if (!sure) return;
 
-  // Ending any GP before wiping ensures stop-audio broadcast
+  // end GP first so stop signal is sent
   if (currentChallenge?.type === "Nisse Grandprix") {
     currentChallenge = { ...currentChallenge, phase: "ended" };
   }
@@ -335,20 +332,19 @@ function handleReset() {
   teams = [];
   selectedTeamId = null;
   currentChallenge = null;
-  deck = makeInitialDeck();
-  endGameResultEl.textContent = "";
+  deck = [];
   gameCode = null;
+  endGameResultEl.textContent = "";
 
   localStorage.removeItem(STORAGE_KEY);
 
+  loadDeckSafely();
   renderTeams();
-  renderDeck();
   renderCurrentChallenge();
   syncToServer();
-  teamNameInput.focus();
 }
 
-// End game (show winner only)
+// End game
 function handleEndGame() {
   if (!teams.length) return alert("Ingen hold endnu.");
 
@@ -361,7 +357,6 @@ function handleEndGame() {
       ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
       : `Uafgjort mellem: ${winners.map(t => t.name).join(", ")} (${topScore} point)`;
 
-  // End GP hard so audio stops
   if (currentChallenge?.type === "Nisse Grandprix") {
     currentChallenge = { ...currentChallenge, phase: "ended" };
     syncToServer();
@@ -374,7 +369,7 @@ function handleStartGame() {
 
   socket.emit("startGame", (res) => {
     if (!res?.ok) {
-      alert(res?.message || "Kunne ikke starte spillet. Prøv igen.");
+      alert(res?.message || "Kunne ikke starte spillet.");
       startGameBtn.disabled = false;
       return;
     }
@@ -392,7 +387,7 @@ function handleStartGame() {
   });
 }
 
-// Event listeners
+// ---------------- Listeners ----------------
 addTeamBtn?.addEventListener("click", () => addTeam(teamNameInput.value));
 teamNameInput?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") addTeam(teamNameInput.value);
@@ -406,13 +401,13 @@ resetBtn?.addEventListener("click", handleReset);
 endGameBtn?.addEventListener("click", handleEndGame);
 startGameBtn?.addEventListener("click", handleStartGame);
 
-// Receive state
+// ---------------- Socket events ----------------
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (s.gameCode) {
+  if (s.gameCode && gameCodeValueEl) {
     gameCode = s.gameCode;
-    if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
+    gameCodeValueEl.textContent = gameCode;
   }
 
   if (Array.isArray(s.teams)) teams = s.teams;
@@ -427,16 +422,12 @@ socket.on("state", (s) => {
 
 socket.on("buzzed", (teamName) => {
   const t = teams.find(x => x.name === teamName);
-  if (t) {
-    selectedTeamId = t.id;
-    renderTeams();
-  }
+  if (t) { selectedTeamId = t.id; renderTeams(); }
 });
 
-// Init
+// ---------------- Init ----------------
 loadLocal();
 renderTeams();
-renderDeck();
 renderCurrentChallenge();
-teamNameInput?.focus();
+loadDeckSafely();
 if (gameCodeValueEl && gameCode) gameCodeValueEl.textContent = gameCode;
