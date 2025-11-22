@@ -92,17 +92,19 @@ const adminSockets = new Set();
 // -----------------------------
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
+
+  // Send current state to anyone who connects
   socket.emit("state", state);
 
   // Admin registers
   socket.on("registerAdmin", () => {
     adminSockets.add(socket.id);
     socket.role = "admin";
-    // ADMIN: force-stop Grandprix audio on all team clients immediately
-socket.on("gp-stop-audio-now", () => {
-  io.emit("gp-stop-audio-now");
-});
+  });
 
+  // ✅ ADMIN: force-stop Grandprix audio on all teams NOW
+  socket.on("gp-stop-audio-now", () => {
+    io.emit("gp-stop-audio-now");
   });
 
   // ADMIN: start new game
@@ -164,18 +166,6 @@ socket.on("gp-stop-audio-now", () => {
     if (!Array.isArray(deck)) return;
     state.challengeDeck = deck;
     emitState();
-    // ADMIN -> TEAM: stop mic stream
-socket.on("gp-stop-mic", ({ toTeamId }) => {
-  if (!toTeamId) return;
-
-  for (const [id, s] of io.of("/").sockets) {
-    if (s.teamId === toTeamId) {
-      io.to(id).emit("gp-stop-mic");
-      break;
-    }
-  }
-});
-
   });
 
   // ADMIN: start a deck challenge
@@ -224,7 +214,7 @@ socket.on("gp-stop-mic", ({ toTeamId }) => {
     ch.firstBuzz = { teamId, teamName, at: Date.now() };
     ch.phase = "locked";
 
-    // ⭐ start global 5-second countdown
+    // start global 5-second countdown
     ch.countdownStartAt = Date.now() + 200;
     ch.countdownSeconds = 5;
 
@@ -320,6 +310,18 @@ socket.on("gp-stop-mic", ({ toTeamId }) => {
     }
   });
 
+  // ADMIN -> TEAM: stop mic stream
+  socket.on("gp-stop-mic", ({ toTeamId }) => {
+    if (!toTeamId) return;
+
+    for (const [id, s] of io.of("/").sockets) {
+      if (s.teamId === toTeamId) {
+        io.to(id).emit("gp-stop-mic");
+        break;
+      }
+    }
+  });
+
   socket.on("disconnect", () => {
     adminSockets.delete(socket.id);
     console.log("Client disconnected:", socket.id);
@@ -335,5 +337,3 @@ const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
-
-
