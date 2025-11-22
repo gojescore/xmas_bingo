@@ -1,5 +1,5 @@
 // public/minigames/julekortet.js
-// Team-side JuleKortet: 2 min writing, red text, Xmas card popup, anonymous voting
+// FIX: socket is passed in from team.js
 
 let writingTimer = null;
 let popupEl = null;
@@ -37,7 +37,7 @@ export function stopJuleKortet(api) {
   api?.showStatus?.("");
 }
 
-export function renderJuleKortet(ch, api) {
+export function renderJuleKortet(ch, api, socket) {
   api.setBuzzEnabled(false);
 
   const popup = ensurePopup();
@@ -48,11 +48,10 @@ export function renderJuleKortet(ch, api) {
   const sendBtn = popup.querySelector("#jkSendBtn");
   const statusEl = popup.querySelector("#jkStatus");
 
-  // voting UI container (after writing)
   const existingVote = document.getElementById("jkVoteWrap");
   if (existingVote) existingVote.remove();
 
-  // --- phase handling ---
+  // --- WRITING PHASE ---
   if (ch.phase === "writing") {
     textarea.disabled = false;
     sendBtn.disabled = false;
@@ -104,8 +103,8 @@ export function renderJuleKortet(ch, api) {
     }
   }
 
+  // --- VOTING PHASE ---
   if (ch.phase === "voting") {
-    // hide writing box, show anonymous cards to vote on
     textarea.disabled = true;
     sendBtn.disabled = true;
     timeLeftEl.textContent = "0";
@@ -134,6 +133,7 @@ export function renderJuleKortet(ch, api) {
     popup.querySelector(".jk-card").appendChild(voteWrap);
   }
 
+  // --- ENDED ---
   if (ch.phase === "ended") {
     statusEl.textContent = "Runden er slut 🎉";
     textarea.disabled = true;
