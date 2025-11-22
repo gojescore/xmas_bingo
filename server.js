@@ -10,12 +10,11 @@ app.use(express.static("public"));
 // ---------------------------
 let state = {
   teams: [],
-  currentChallenge: null,
+  currentChallenge: null, // object or null
   gameCode: null,
   deck: []
 };
 
-// Helper: always compare codes as trimmed strings
 function normalizeCode(c) {
   return String(c ?? "").trim();
 }
@@ -26,9 +25,9 @@ function normalizeCode(c) {
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
 
-  // Send current state on connect
   socket.emit("state", state);
 
+  // ---- TEAM JOIN ----
   socket.on("joinGame", ({ code, teamName }, callback) => {
     const serverCode = normalizeCode(state.gameCode);
     const clientCode = normalizeCode(code);
@@ -42,28 +41,76 @@ io.on("connection", (socket) => {
       return callback({ ok: false, message: "Skriv et teamnavn" });
     }
 
-    if (state.teams.find(t => t.name.toLowerCase() === cleanName.toLowerCase())) {
+    if (state.teams.some(t => t.name.toLowerCase() === cleanName.toLowerCase())) {
       return callback({ ok: false, message: "Navn findes allerede" });
     }
 
-    const team = { name: cleanName, points: 0 };
+    const team = { id: "t" + Date.now() + Math.random(), name: cleanName, points: 0 };
     state.teams.push(team);
+
+    // remember team name on socket
+    socket.teamName = cleanName;
 
     io.emit("state", state);
     callback({ ok: true, team });
   });
 
-  socket.on("buzz", (info) => {
-    io.emit("buzzed", info?.teamName || info);
+  // ---- BUZZ (authoritative GP lock happens here) ----
+  socket.on("buzz", ({ audioPosition } = {}) => {
+    const teamName = socket.teamName || "Unknown";
+
+    // If current challenge is Grandprix and still listening -> lock it
+    const ch = state.currentChallenge;
+    if (
+      ch &&
+      ch.type === "Nisse Grandprix" &&
+      ch.phase === "listening" &&
+      !ch.firstBuzz
+    ) {
+      state.currentChallenge = {
+        ...ch,
+        phase: "locked",
+        firstBuzz: { teamName, audioPosition: audioPosition ?? null },
+        countdownStartAt: Date.now(),
+        countdownSeconds: ch.countdownSeconds || 5
+      };
+
+      io.emit("state", state);
+      io.emit("buzzed", teamName);
+      return;
+    }
+
+    // Otherwise just tell admin who buzzed (non-GP future use)
+    io.emit("buzzed", teamName);
   });
 
+  // ---- TYPED ANSWER (buzzing team -> admin) ----
+  socket.on("gp-typed-answer", ({ text }) => {
+    const teamName = socket.teamName || "Unknown";
+    io.emit("gp-typed-answer", { teamName, text: String(text ?? "").trim() });
+  });
+
+  // ---- STOP AUDIO NOW (admin force stop) ----
   socket.on("gp-stop-audio-now", () => {
     io.emit("gp-stop-audio-now");
   });
 
+  // ---- STATE UPDATE FROM ADMIN ----
   socket.on("updateState", (newState) => {
-    // Admin is truth
+    const prev = state.currentChallenge;
     state = newState;
+
+    // If GP just ended/cleared -> force stop audio for everyone
+    const nowCh = state.currentChallenge;
+    const gpEnded =
+      prev &&
+      prev.type === "Nisse Grandprix" &&
+      (!nowCh || nowCh.phase === "ended");
+
+    if (gpEnded) {
+      io.emit("gp-stop-audio-now");
+    }
+
     io.emit("state", state);
   });
 
