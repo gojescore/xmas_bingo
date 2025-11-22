@@ -56,14 +56,14 @@ function makeInitialDeck() {
       id: 1,
       type: "Nisse Grandprix",
       title: "Grandprix 1",
-      audioUrl: "PASTE_SUPABASE_URL_1",
+      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/SorenBanjo.mp3",
       used: false,
     },
     {
       id: 2,
       type: "Nisse Grandprix",
       title: "Grandprix 2",
-      audioUrl: "PASTE_SUPABASE_URL_2",
+      audioUrl: "https://ldaskskrbotxxhoqdzdc.supabase.co/storage/v1/object/public/grandprix-audio/hojtFraT.mp3",
       used: false,
     },
     {
@@ -441,3 +441,4 @@ renderTeams();
 renderDeck();
 updateCurrentChallengeTextOnly();
 teamNameInput.focus();
+
