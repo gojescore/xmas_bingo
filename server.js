@@ -159,6 +159,18 @@ io.on("connection", (socket) => {
     if (!Array.isArray(deck)) return;
     state.challengeDeck = deck;
     emitState();
+    // ADMIN -> TEAM: stop mic stream
+socket.on("gp-stop-mic", ({ toTeamId }) => {
+  if (!toTeamId) return;
+
+  for (const [id, s] of io.of("/").sockets) {
+    if (s.teamId === toTeamId) {
+      io.to(id).emit("gp-stop-mic");
+      break;
+    }
+  }
+});
+
   });
 
   // ADMIN: start a deck challenge
@@ -318,3 +330,4 @@ const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
+
