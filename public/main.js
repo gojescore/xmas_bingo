@@ -1,4 +1,4 @@
-// public/main.js (MODULE Version A)
+// public/main.js (FIXED: single-sync decisions, GP audio always stops)
 
 import { grandprixDeck } from "./data/deck/grandprix.js";
 import { nisseGaaden } from "./data/deck/nissegaaden.js";
@@ -28,7 +28,7 @@ const resetBtn = document.getElementById("resetBtn");
 const startGameBtn = document.getElementById("startGameBtn");
 const gameCodeValueEl = document.getElementById("gameCodeValue");
 
-// Countdown element on main (to right of "ikke fuldført")
+// Countdown (main) – sits right of “ikke fuldført”
 let mainCountdownEl = null;
 function ensureMainCountdownEl() {
   if (mainCountdownEl) return mainCountdownEl;
@@ -51,9 +51,9 @@ let deck = makeInitialDeck();
 let gameCode = null;
 
 let isPointsCooldown = false;
-const STORAGE_KEY = "xmasChallengeState_v4";
+const STORAGE_KEY = "xmasChallengeState_v5";
 
-// Build initial deck from imported sets
+// Initial deck from imports
 function makeInitialDeck() {
   return [
     ...grandprixDeck,
@@ -82,7 +82,7 @@ function loadLocal() {
   } catch {}
 }
 
-// Sync to server
+// Sync to server (admins are truth)
 function syncToServer() {
   if (!socket || socket.disconnected) return;
   socket.emit("updateState", { gameCode, teams, deck, currentChallenge });
@@ -152,7 +152,7 @@ function renderDeck() {
   });
 }
 
-// Render current challenge text + countdown on main
+// Main countdown render
 let mainCountdownTimer = null;
 function renderCurrentChallenge() {
   if (!currentChallenge) {
@@ -179,8 +179,7 @@ function showMainCountdown(startAtMs, seconds) {
   if (mainCountdownTimer) clearInterval(mainCountdownTimer);
 
   const tick = () => {
-    const now = Date.now();
-    const elapsed = Math.floor((now - startAtMs) / 1000);
+    const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
     const left = Math.max(0, seconds - elapsed);
     mainCountdownEl.textContent = left;
 
@@ -224,6 +223,7 @@ function addTeam(name) {
   teamNameInput.focus();
 }
 
+// Normal +/- buttons can still sync instantly
 function changePoints(teamId, delta) {
   if (isPointsCooldown) return;
   const team = teams.find(t => t.id === teamId);
@@ -239,7 +239,7 @@ function changePoints(teamId, delta) {
   setTimeout(() => isPointsCooldown = false, 400);
 }
 
-// Selecting a challenge
+// Set current challenge
 function setCurrentChallenge(card) {
   if (card.type === "Nisse Grandprix") {
     const startDelayMs = 3000;
@@ -259,32 +259,39 @@ function setCurrentChallenge(card) {
   syncToServer();
 }
 
-// Mark current card used
+// Mark card used
 function markCurrentUsed() {
   if (!currentChallenge) return;
   const idx = deck.findIndex(c => c.id === currentChallenge.id);
   if (idx >= 0) deck[idx].used = true;
 }
 
-// End current challenge safely
+// End current challenge
 function endCurrentChallenge() {
   if (!currentChallenge) return;
   if (currentChallenge.type === "Nisse Grandprix") {
-    currentChallenge.phase = "ended";
+    currentChallenge = { ...currentChallenge, phase: "ended" };
   } else {
     currentChallenge = null;
   }
 }
 
-// Decision buttons
+// ✅ FIXED DECISIONS (single sync AFTER GP ended)
 function handleYes() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
-  changePoints(selectedTeamId, 1);
-  markCurrentUsed();
+  // 1) End GP FIRST so server triggers stop-audio-now
   endCurrentChallenge();
 
+  // 2) Then award point locally (no premature sync)
+  const team = teams.find(t => t.id === selectedTeamId);
+  if (team) team.points = (team.points ?? 0) + 1;
+
+  // 3) Mark used and sync once
+  markCurrentUsed();
+
+  renderTeams();
   renderDeck();
   renderCurrentChallenge();
   saveLocal();
@@ -294,8 +301,8 @@ function handleYes() {
 function handleNo() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  markCurrentUsed();
   endCurrentChallenge();
+  markCurrentUsed();
 
   renderDeck();
   renderCurrentChallenge();
@@ -306,8 +313,8 @@ function handleNo() {
 function handleIncomplete() {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  markCurrentUsed();
   endCurrentChallenge();
+  markCurrentUsed();
 
   renderDeck();
   renderCurrentChallenge();
@@ -315,10 +322,15 @@ function handleIncomplete() {
   syncToServer();
 }
 
-// Reset everything
+// Reset all
 function handleReset() {
   const sure = confirm("Nulstil hele spillet? (hold, point og udfordringer)");
   if (!sure) return;
+
+  // Ending any GP before wiping ensures stop-audio broadcast
+  if (currentChallenge?.type === "Nisse Grandprix") {
+    currentChallenge = { ...currentChallenge, phase: "ended" };
+  }
 
   teams = [];
   selectedTeamId = null;
@@ -336,7 +348,7 @@ function handleReset() {
   teamNameInput.focus();
 }
 
-// End game (does NOT wipe; just shows winner)
+// End game (show winner only)
 function handleEndGame() {
   if (!teams.length) return alert("Ingen hold endnu.");
 
@@ -349,13 +361,14 @@ function handleEndGame() {
       ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
       : `Uafgjort mellem: ${winners.map(t => t.name).join(", ")} (${topScore} point)`;
 
+  // End GP hard so audio stops
   if (currentChallenge?.type === "Nisse Grandprix") {
-    currentChallenge.phase = "ended";
+    currentChallenge = { ...currentChallenge, phase: "ended" };
     syncToServer();
   }
 }
 
-// Start game (server is truth — no local fallback)
+// Start game (server truth only)
 function handleStartGame() {
   startGameBtn.disabled = true;
 
@@ -369,9 +382,6 @@ function handleStartGame() {
     gameCode = res.gameCode;
     if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
 
-    // keep local deck unless server sent one
-    if (res.state?.deck && Array.isArray(res.state.deck)) deck = res.state.deck;
-
     currentChallenge = null;
 
     renderTeams();
@@ -382,7 +392,7 @@ function handleStartGame() {
   });
 }
 
-// Listeners
+// Event listeners
 addTeamBtn?.addEventListener("click", () => addTeam(teamNameInput.value));
 teamNameInput?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") addTeam(teamNameInput.value);
@@ -396,7 +406,7 @@ resetBtn?.addEventListener("click", handleReset);
 endGameBtn?.addEventListener("click", handleEndGame);
 startGameBtn?.addEventListener("click", handleStartGame);
 
-// Server state
+// Receive state
 socket.on("state", (s) => {
   if (!s) return;
 
