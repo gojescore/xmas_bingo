@@ -1,8 +1,7 @@
-// public/team.js (v26)
+// public/team.js (v27)
 // Router for team screens.
-// - Grandprix stable
-// - NisseGåden stable + big text handled inside minigame
-// - JuleKortet added (2 min writing + anonymous voting)
+// FIX: Do NOT stop Grandprix on every state update.
+// Only stop GP when leaving that challenge.
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -114,6 +113,7 @@ function tryJoin() {
 buzzBtn?.addEventListener("click", async () => {
   if (!joined) return;
 
+  // If autoplay blocked, buzz click also "unlocks" play
   if (window.__grandprixAudio && window.__grandprixAudio.paused) {
     try { await window.__grandprixAudio.play(); } catch {}
   }
@@ -314,12 +314,12 @@ function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
-  // ✅ minigames clean themselves
+  // minigames clean themselves EXCEPT grandprix (only stop when leaving)
   stopNisseGaaden(api);
   stopJuleKortet(api);
-  stopGrandprix();
 
   if (!ch) {
+    stopGrandprix(); // leaving GP safely
     challengeTitle.textContent = "Ingen udfordring endnu";
     challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
@@ -330,9 +330,13 @@ function renderChallenge(ch) {
   challengeText.textContent = ch.text || "";
 
   if (ch.type === "Nisse Grandprix") {
+    // DO NOT stop here; GP must persist across state updates
     renderGrandprix(ch, api);
     return;
   }
+
+  // leaving GP
+  stopGrandprix();
 
   if (ch.type === "NisseGåden") {
     renderNisseGaaden(ch, api);
