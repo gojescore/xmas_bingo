@@ -98,6 +98,11 @@ io.on("connection", (socket) => {
   socket.on("registerAdmin", () => {
     adminSockets.add(socket.id);
     socket.role = "admin";
+    // ADMIN: force-stop Grandprix audio on all team clients immediately
+socket.on("gp-stop-audio-now", () => {
+  io.emit("gp-stop-audio-now");
+});
+
   });
 
   // ADMIN: start new game
@@ -330,4 +335,5 @@ const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log("Server listening on port", PORT);
 });
+
 
