@@ -1,6 +1,5 @@
-// public/main.js v30
-// FULL admin controller with stable Grandprix + NisseGåden + JuleKortet.
-// Requires: team.js v30, minigames/grandprix.js v2, julekortet.js v3
+// public/main.js v31
+// Fixes: NisseGåden team names, Grandprix answer team, JuleKortet voting undefined/self-vote.
 
 const socket = io();
 
@@ -31,7 +30,7 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v30";
+const STORAGE_KEY = "xmasChallenge_admin_v31";
 
 // ---------------- Persistence ----------------
 function saveLocal() {
@@ -138,11 +137,11 @@ function renderDeck() {
           ...card,
           phase: "listening",
           startAt: Date.now() + 3000,
-          firstBuzz: null,                 // { teamName }
+          firstBuzz: null,              
           countdownSeconds: 20,
           countdownStartAt: null,
-          typedAnswer: null,               // { teamName, text }
-          answeredTeams: {}                // lock who already answered (safety)
+          typedAnswer: null,           
+          answeredTeams: {}            
         };
       } 
       else if (card.type === "JuleKortet") {
@@ -151,9 +150,9 @@ function renderDeck() {
           phase: "writing",
           writingSeconds: 120,
           writingStartAt: Date.now(),
-          cards: [],                       // [{ teamName, text }]
-          votingCards: [],                 // anonymized shuffled
-          votes: {},                       // { voterTeamName: votingIndex }
+          cards: [],                   // [{ teamName, text }]
+          votingCards: [],           
+          votes: {},                 
           winners: []
         };
         startAdminWritingTimer();
@@ -286,7 +285,7 @@ function renderMiniGameArea() {
         box.style.cssText =
           "padding:8px; border:1px solid #ddd; border-radius:8px; margin-bottom:6px; background:#fff;";
         box.innerHTML = `
-          <div><strong>${a.teamName}</strong>:</div>
+          <div><strong>${a.teamName || a.team || "Ukendt hold"}</strong>:</div>
           <div>${a.text}</div>
         `;
         wrap.appendChild(box);
@@ -377,13 +376,11 @@ function startAdminWritingTimer() {
     const elc = document.getElementById("jkAdminCountdown");
     if (elc) elc.textContent = `Tid tilbage til skrivning: ${left}s`;
 
-    // Auto-switch if time runs out
     if (left <= 0) {
       clearInterval(jkAdminTimer);
       startVotingPhase();
     }
 
-    // Auto-switch if everybody sent
     if (currentChallenge.cards.length >= teams.length && teams.length > 0) {
       clearInterval(jkAdminTimer);
       startVotingPhase();
@@ -400,11 +397,10 @@ function startVotingPhase() {
   if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
   if (currentChallenge.phase !== "writing") return;
 
-  // anonymize + shuffle for voting
   const votingCards = shuffle(
     currentChallenge.cards.map(c => ({
       text: c.text,
-      ownerTeamName: c.teamName  // hidden in UI, used for self-vote block + awarding
+      ownerTeamName: c.teamName || c.team  // <--- HARDEN
     }))
   );
 
@@ -439,9 +435,10 @@ function finishVotingAndAward() {
     .filter(x => x.c === max)
     .map(x => x.i);
 
-  const winners = winningIndexes.map(i => cards[i].ownerTeamName);
+  const winners = winningIndexes
+    .map(i => cards[i].ownerTeamName)
+    .filter(Boolean); // <--- NEVER undefined
 
-  // Award points directly, ties give all winners +1
   winners.forEach(name => {
     const t = teams.find(x => x.name === name);
     if (t) t.points = (t.points ?? 0) + 1;
@@ -449,12 +446,6 @@ function finishVotingAndAward() {
 
   ch.phase = "ended";
   ch.winners = winners;
-
-  alert(
-    winners.length === 1
-      ? `Vinder: ${winners[0]} (+1 point)`
-      : `Uafgjort mellem: ${winners.join(", ")} (alle får +1 point)`
-  );
 
   renderTeams();
   renderMiniGameArea();
@@ -584,8 +575,6 @@ addTeamBtn.onclick = () => {
 };
 
 // ---------------- SOCKET LISTENERS ----------------
-
-// Server emits buzzed(teamName)
 socket.on("buzzed", (teamName) => {
   if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
   if (currentChallenge.phase !== "listening") return;
@@ -605,18 +594,17 @@ socket.on("buzzed", (teamName) => {
   syncToServer();
 });
 
-// Cards from teams
-socket.on("newCard", ({ team, text }) => {
+socket.on("newCard", ({ team, text, teamName }) => {
   if (!currentChallenge) return;
+  const sender = teamName || team;
 
   if (currentChallenge.type === "NisseGåden") {
-    currentChallenge.answers.push({ teamName: team, text });
+    currentChallenge.answers.push({ teamName: sender, text });
   }
 
   if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
-    // one card per team
-    const already = currentChallenge.cards.some(c => c.teamName === team);
-    if (!already) currentChallenge.cards.push({ teamName: team, text });
+    const already = currentChallenge.cards.some(c => (c.teamName || c.team) === sender);
+    if (!already) currentChallenge.cards.push({ teamName: sender, text });
   }
 
   renderMiniGameArea();
@@ -624,7 +612,6 @@ socket.on("newCard", ({ team, text }) => {
   syncToServer();
 });
 
-// Votes from teams
 socket.on("voteUpdate", ({ voter, index }) => {
   if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
   if (currentChallenge.phase !== "voting") return;
@@ -636,14 +623,11 @@ socket.on("voteUpdate", ({ voter, index }) => {
   syncToServer();
 });
 
-// Typed GP answer from buzzing team
 socket.on("gp-typed-answer", ({ teamName, text }) => {
   if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
-
-  // lock ONE answer per team per round
   if (currentChallenge.answeredTeams[teamName]) return;
-  currentChallenge.answeredTeams[teamName] = true;
 
+  currentChallenge.answeredTeams[teamName] = true;
   currentChallenge.typedAnswer = { teamName, text };
 
   renderMiniGameArea();
@@ -651,7 +635,6 @@ socket.on("gp-typed-answer", ({ teamName, text }) => {
   syncToServer();
 });
 
-// Server state is truth
 socket.on("state", (s) => {
   if (!s) return;
 
