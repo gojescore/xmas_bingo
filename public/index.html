@@ -4,16 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Main Control</title>
-  <link rel="stylesheet" href="style.css?v=12" />
+
+  <!-- CSS in same folder -->
+  <link rel="stylesheet" href="style.css?v=8" />
 </head>
 <body>
   <div class="app">
+
+    <!-- HEADER -->
     <header class="app-header">
       <div class="header-main">
         <h1>🎄 Xmas Challenge – Game Master</h1>
         <p>Opret hold, vælg udfordringer og styr pointene.</p>
       </div>
 
+      <!-- Start game + code -->
       <div class="game-code-box">
         <button id="startGameBtn" class="start-game-btn">▶ Start Xmas Challenge</button>
         <div id="gameCodeDisplay" class="game-code-display">
@@ -25,7 +30,11 @@
     </header>
 
     <main class="layout">
+
+      <!-- LEFT SIDE -->
       <section class="main-panel">
+
+        <!-- TEAM SETUP -->
         <div class="teams-setup">
           <h2>Hold</h2>
           <div class="team-form">
@@ -34,13 +43,17 @@
           </div>
         </div>
 
+        <!-- CHALLENGE PICKER -->
         <div class="challenge-picker">
           <h2>Udfordringer</h2>
+
+          <!-- The deck renders into this grid automatically -->
           <div class="challenge-grid">
-            <!-- JS fills deck boxes here -->
+            <!-- JS fills -->
           </div>
         </div>
 
+        <!-- CURRENT CHALLENGE -->
         <div class="current-challenge">
           <h2>Aktuel udfordring</h2>
           <p id="currentChallengeText">Ingen udfordring valgt endnu.</p>
@@ -56,34 +69,33 @@
           </p>
         </div>
 
+        <!-- 👇 MINI GAME ADMIN AREA (JuleKortet etc.) -->
+        <div id="miniGameArea"></div>
+
+        <!-- END GAME -->
         <div class="game-end">
           <button id="endGameBtn" class="end-game">🏁 Afslut spil</button>
           <p id="endGameResult" class="end-result"></p>
         </div>
+
       </section>
 
+      <!-- RIGHT SIDE: LEADERBOARD -->
       <aside class="sidebar">
         <h2>Leaderboard</h2>
         <p class="sidebar-hint">Klik på et hold for at vælge det. Brug + / - for point.</p>
-        <ul id="teamList" class="team-list"></ul>
+        <ul id="teamList" class="team-list">
+          <!-- JS fills -->
+        </ul>
       </aside>
+
     </main>
   </div>
 
+  <!-- Socket.IO client -->
   <script src="/socket.io/socket.io.js"></script>
-  <!-- IMPORTANT: module, because Version A uses imports -->
-  <script type="module" src="main.js?v=26"></script>
+
+  <!-- Admin JS -->
+  <script type="module" src="main.js?v=25"></script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
