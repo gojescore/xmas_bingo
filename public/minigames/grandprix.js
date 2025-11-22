@@ -1,5 +1,5 @@
 // public/minigames/grandprix.js
-// Team-side Nisse Grandprix (distributed audio + synced start/resume)
+// Team-side Nisse Grandprix (distributed audio + synced start/resume + safe unlock)
 
 let audio = null;
 let loadedUrl = null;
@@ -20,12 +20,11 @@ function unlockAudioOnce(api) {
 
   const unlock = async () => {
     try {
-      // try play + pause inside gesture
       await audio.play();
       audio.pause();
       audioUnlocked = true;
       api.showStatus("🔊 Lyd aktiveret!");
-    } catch (e) {
+    } catch {
       api.showStatus("⚠️ Tryk én gang mere for at aktivere lyd.");
     }
     document.removeEventListener("pointerdown", unlock);
@@ -63,7 +62,6 @@ async function safePlay(api) {
   try {
     await audio.play();
   } catch {
-    // if blocked, set up unlock
     unlockAudioOnce(api);
     api.showStatus("🔊 Tryk på skærmen for at starte lyd.");
   }
@@ -156,4 +154,16 @@ export function renderGrandprix(challenge, api) {
   }
 
   lastPhase = phase;
+}
+
+// ✅ Hard stop used by admin stop event + when leaving Grandprix
+export function stopGrandprix() {
+  clearTimers();
+  if (audio) {
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+    } catch {}
+  }
+  lastPhase = null;
 }
