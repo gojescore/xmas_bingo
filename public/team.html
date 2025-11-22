@@ -4,13 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Team</title>
-
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
   <div class="app">
 
-    <!-- HEADER -->
     <header style="text-align:center; margin-bottom:20px;">
       <h1 style="margin:0;">🎄 Xmas Challenge – Team</h1>
       <p id="teamNameLabel" style="
@@ -21,17 +19,14 @@
       "></p>
     </header>
 
-    <!-- JOIN SECTION -->
     <section id="joinSection" style="max-width:420px; margin:0 auto 20px auto;">
       <h2>Join spillet</h2>
 
-      <!-- Step 1: game code -->
       <div style="display:flex; gap:8px; margin-bottom:8px;">
         <input id="codeInput" type="text" placeholder="Indtast game code" />
         <button id="codeBtn">Join med kode</button>
       </div>
 
-      <!-- Step 2: team name -->
       <div id="nameRow" style="display:none; gap:8px; margin-bottom:8px;">
         <input id="nameInput" type="text" placeholder="Skriv jeres teamnavn" />
         <button id="nameBtn">Join som team</button>
@@ -40,14 +35,12 @@
       <p id="joinMsg" style="font-weight:600;"></p>
     </section>
 
-    <!-- TOP INFO BAR -->
     <section style="text-align:center; margin-bottom:16px;">
       Game code: <strong><span id="codeDisplay">----</span></strong>
     </section>
 
     <main class="layout" style="display:grid; grid-template-columns: 2fr 1fr; gap:16px;">
 
-      <!-- LEFT: CHALLENGE + BUZZ -->
       <section class="main-panel" style="display:flex; flex-direction:column; gap:12px;">
 
         <div class="current-challenge" style="padding:12px; border:1px solid #ddd; border-radius:12px;">
@@ -72,7 +65,7 @@
           <p id="status" style="margin-top:10px; font-size:1.1rem; font-weight:700;"></p>
         </div>
 
-        <!-- Grandprix answer popup (used when THIS team buzzes first) -->
+        <!-- Grandprix answer popup -->
         <div id="grandprixPopup" style="
           position:fixed; inset:0; z-index:9997;
           display:none; align-items:center; justify-content:center;
@@ -91,24 +84,15 @@
 
       </section>
 
-      <!-- RIGHT: LEADERBOARD -->
       <aside class="sidebar" style="padding:12px; border:1px solid #ddd; border-radius:12px;">
         <h2>Leaderboard</h2>
-        <ul id="teamList" class="team-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;">
-          <!-- JS fills -->
-        </ul>
+        <ul id="teamList" class="team-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:6px;"></ul>
       </aside>
 
     </main>
   </div>
 
-  <!-- Socket.IO client -->
   <script src="/socket.io/socket.io.js"></script>
-
-  <!-- Team script -->
   <script type="module" src="team.js?v=12"></script>
 </body>
 </html>
-
-
-
