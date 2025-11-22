@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Main Control</title>
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
   <div class="app">
@@ -26,7 +26,6 @@
 
     <main class="layout">
       <section class="main-panel">
-
         <div class="teams-setup">
           <h2>Hold</h2>
           <div class="team-form">
@@ -37,8 +36,9 @@
 
         <div class="challenge-picker">
           <h2>Udfordringer</h2>
-          <!-- Deck cards injected here -->
-          <div class="challenge-grid"></div>
+          <div class="challenge-grid">
+            <!-- JS fills deck boxes here -->
+          </div>
         </div>
 
         <div class="current-challenge">
@@ -46,25 +46,10 @@
           <p id="currentChallengeText">Ingen udfordring valgt endnu.</p>
 
           <div class="challenge-controls">
-  <button id="yesBtn" class="yes">✔ Ja</button>
-  <button id="noBtn" class="no">✖ Nej</button>
-  <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
-
-  <!-- countdown sits right of "Ikke fuldført" -->
-  <div id="grandprixCountdown" class="gp-countdown" style="display:none;"></div>
-
-  <!-- admin hears mic here -->
-  <audio id="grandprixRemoteAudio" autoplay></audio>
-</div>
-
-
-  <!-- countdown sits RIGHT of "Ikke fuldført" -->
-  <div id="grandprixCountdown" class="gp-countdown"></div>
-
-  <!-- admin hears mic here -->
-  <audio id="grandprixRemoteAudio" autoplay></audio>
-</div>
-
+            <button id="yesBtn" class="yes">✔ Ja</button>
+            <button id="noBtn" class="no">✖ Nej</button>
+            <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
+          </div>
 
           <p class="hint">
             Klik på et hold til højre for at markere vinderen, og tryk derefter “Ja”.
@@ -75,7 +60,6 @@
           <button id="endGameBtn" class="end-game">🏁 Afslut spil</button>
           <p id="endGameResult" class="end-result"></p>
         </div>
-
       </section>
 
       <aside class="sidebar">
@@ -87,17 +71,7 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script type="module" src="main.js?v=13"></script>
-
+  <!-- IMPORTANT: module, because Version A uses imports -->
+  <script type="module" src="main.js?v=12"></script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
