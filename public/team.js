@@ -1,7 +1,8 @@
-// public/team.js (v27)
-// Router for team screens.
-// FIX: Do NOT stop Grandprix on every state update.
-// Only stop GP when leaving that challenge.
+// public/team.js (v28)
+// FIXES:
+// - Grandprix buzz enabled by minigame (phase names aligned)
+// - Pass socket into minigames (no globals)
+// - NisseGåden + JuleKortet stable
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -30,7 +31,7 @@ const statusEl = el("status");
 
 const teamNameLabel = el("teamNameLabel");
 
-// Grandprix popup elements (must exist in team.html)
+// Grandprix popup elements
 const gpPopup = el("grandprixPopup");
 const gpPopupCountdown = el("grandprixPopupCountdown");
 
@@ -113,7 +114,7 @@ function tryJoin() {
 buzzBtn?.addEventListener("click", async () => {
   if (!joined) return;
 
-  // If autoplay blocked, buzz click also "unlocks" play
+  // unlock autoplay if needed
   if (window.__grandprixAudio && window.__grandprixAudio.paused) {
     try { await window.__grandprixAudio.play(); } catch {}
   }
@@ -125,7 +126,7 @@ buzzBtn?.addEventListener("click", async () => {
   socket.emit("buzz", { audioPosition });
 });
 
-// stop audio forced (admin pressed yes/no/etc)
+// admin stop => stop on team
 socket.on("gp-stop-audio-now", () => {
   stopGrandprix();
   api.clearMiniGame();
@@ -155,7 +156,7 @@ function renderLeaderboard(teams) {
 }
 
 // ===========================
-// NISSEGÅDEN answer (small input under riddle)
+// NISSEGÅDEN answer input
 // ===========================
 let ngWrap = null, ngInput = null, ngBtn = null;
 
@@ -203,7 +204,7 @@ function hideNisseGaadenAnswer() {
 }
 
 // ===========================
-// GRANDPRIX POPUP (fullscreen + answer for buzzing team)
+// GRANDPRIX POPUP
 // ===========================
 let gpPopupTimer = null;
 let gpAnswerInput = null;
@@ -264,12 +265,6 @@ function showGrandprixPopup(startAtMs, seconds, showAnswer) {
   if (gpPopupTimer) clearInterval(gpPopupTimer);
 
   gpPopup.style.display = "flex";
-  gpPopup.style.flexDirection = "column";
-  gpPopup.style.justifyContent = "center";
-  gpPopup.style.alignItems = "center";
-  gpPopup.style.gap = "10px";
-  gpPopup.style.padding = "20px";
-  gpPopup.style.zIndex = "9999";
 
   ensureGpAnswerUI();
 
@@ -288,10 +283,6 @@ function showGrandprixPopup(startAtMs, seconds, showAnswer) {
     if (left <= 0) {
       clearInterval(gpPopupTimer);
       gpPopupTimer = null;
-
-      if (gpAnswerInput) gpAnswerInput.disabled = true;
-      if (gpAnswerBtn) gpAnswerBtn.disabled = true;
-
       setTimeout(hideGrandprixPopup, 600);
     }
   }
@@ -308,18 +299,17 @@ function hideGrandprixPopup() {
 }
 
 // ===========================
-// Challenge render (router)
+// Challenge router
 // ===========================
 function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
-  // minigames clean themselves EXCEPT grandprix (only stop when leaving)
   stopNisseGaaden(api);
   stopJuleKortet(api);
 
   if (!ch) {
-    stopGrandprix(); // leaving GP safely
+    stopGrandprix();
     challengeTitle.textContent = "Ingen udfordring endnu";
     challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
@@ -330,8 +320,8 @@ function renderChallenge(ch) {
   challengeText.textContent = ch.text || "";
 
   if (ch.type === "Nisse Grandprix") {
-    // DO NOT stop here; GP must persist across state updates
-    renderGrandprix(ch, api);
+    // GP must persist across updates
+    renderGrandprix(ch, api, socket);
     return;
   }
 
@@ -345,7 +335,7 @@ function renderChallenge(ch) {
   }
 
   if (ch.type === "JuleKortet") {
-    renderJuleKortet(ch, api);
+    renderJuleKortet(ch, api, socket);
     return;
   }
 
