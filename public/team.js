@@ -1,4 +1,5 @@
 // public/team.js v31
+console.log("[TEAM] team.js loaded OK");
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -410,6 +411,7 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
 
 
 
