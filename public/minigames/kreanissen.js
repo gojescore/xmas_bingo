@@ -1,22 +1,20 @@
 // public/minigames/kreanissen.js v2
-// Team UI for KreaNissen: 3 min create + webcam photo + anonymous voting
-// Webcam flow: Tag foto -> Prøv igen -> Accepter (upload + submit)
+// KreaNissen: 3 min create + webcam photo (take/retake/accept) + anonymous voting
+// Requires HTTPS (you have it) and a user gesture is NOT needed because popup opens from admin action.
 
-// ---------------- Local state ----------------
 let timer = null;
 let popup = null;
 let hasSubmitted = false;
 let hasVoted = false;
 
-let stream = null;          // MediaStream
+// webcam
+let stream = null;
 let videoEl = null;
 let canvasEl = null;
-let imgEl = null;
-
-let capturedBlob = null;    // Blob after "Tag foto"
+let photoImgEl = null;
+let photoBlob = null;
 let previewUrl = null;
 
-// ---------------- Popup builder ----------------
 function ensurePopup() {
   if (popup) return popup;
 
@@ -29,69 +27,51 @@ function ensurePopup() {
 
   popup.innerHTML = `
     <div style="
-      width:min(760px, 96vw);
+      width:min(820px, 96vw);
       background:#fff7ef;
       border:8px solid #0b6;
       border-radius:18px;
       padding:18px;
       box-shadow:0 8px 30px rgba(0,0,0,0.3);
       text-align:center;
-      font-family: system-ui, sans-serif;
     ">
       <h2 style="margin:0 0 8px; font-size:2.1rem;">🎨 KreaNissen</h2>
       <p id="knPrompt" style="font-size:1.3rem; font-weight:800; margin:0 0 10px;"></p>
 
-      <div style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
+      <div id="knTimerRow" style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
         Tid tilbage: <span id="knTimeLeft">180</span>s
       </div>
 
       <!-- CAMERA AREA -->
-      <div id="knCameraWrap" style="
-        display:flex; flex-direction:column; gap:10px; align-items:center;
-      ">
-        <div style="
-          width:min(520px, 92vw);
-          background:#000;
-          border-radius:12px;
-          overflow:hidden;
-          border:2px solid #ccc;
-        ">
-          <video id="knVideo" autoplay playsinline style="width:100%; display:block;"></video>
-          <img id="knSnapshot" style="width:100%; display:none;" />
-          <canvas id="knCanvas" style="display:none;"></canvas>
-        </div>
+      <div id="knCameraWrap" style="display:flex; flex-direction:column; gap:10px; align-items:center;">
+        <video id="knVideo" autoplay playsinline style="
+          width:100%; max-width:640px; border-radius:12px; border:2px solid #ccc; background:#000;
+        "></video>
 
-        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
+        <img id="knPhotoPreview" style="
+          display:none; width:100%; max-width:640px;
+          border-radius:12px; border:2px solid #ccc;
+        " />
+
+        <canvas id="knCanvas" style="display:none;"></canvas>
+
+        <div id="knButtons" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
           <button id="knTakeBtn" style="
-            font-size:1.3rem; font-weight:900;
-            padding:10px 14px; border-radius:12px; border:none;
-            background:#0b6; color:#fff; cursor:pointer;
+            font-size:1.3rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
           ">📸 Tag foto</button>
 
           <button id="knRetryBtn" disabled style="
-            font-size:1.3rem; font-weight:900;
-            padding:10px 14px; border-radius:12px; border:none;
-            background:#555; color:#fff; cursor:pointer;
+            font-size:1.3rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#555; color:#fff; cursor:pointer;
             opacity:0.6;
           ">🔁 Prøv igen</button>
 
           <button id="knAcceptBtn" disabled style="
-            font-size:1.3rem; font-weight:900;
-            padding:10px 14px; border-radius:12px; border:none;
-            background:#1a7f37; color:#fff; cursor:pointer;
+            font-size:1.3rem; font-weight:900; padding:10px 14px;
+            border-radius:12px; border:none; background:#1a7f37; color:#fff; cursor:pointer;
             opacity:0.6;
           ">✅ Accepter</button>
-        </div>
-
-        <!-- FALLBACK FILE INPUT (hidden unless webcam fails) -->
-        <div id="knFallbackWrap" style="display:none; margin-top:6px;">
-          <input id="knFileInput" type="file" accept="image/*" capture="environment"
-            style="font-size:1.1rem;" />
-          <button id="knSendFallbackBtn" style="
-            margin-left:6px; font-size:1.2rem; font-weight:900;
-            padding:8px 12px; border-radius:10px; border:none;
-            background:#1a7f37; color:#fff; cursor:pointer;
-          ">Send billede</button>
         </div>
 
         <p id="knStatus" style="margin:0; font-weight:800;"></p>
@@ -105,30 +85,7 @@ function ensurePopup() {
   return popup;
 }
 
-// ---------------- Cleanup ----------------
-export function stopKreaNissen(api) {
-  if (timer) clearInterval(timer);
-  timer = null;
-
-  stopCamera();
-
-  if (popup) popup.remove();
-  popup = null;
-
-  hasSubmitted = false;
-  hasVoted = false;
-  capturedBlob = null;
-
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-    previewUrl = null;
-  }
-
-  api?.showStatus?.("");
-}
-
-// ---------------- Camera helpers ----------------
-async function startCamera(statusEl, fallbackWrap) {
+async function startCamera() {
   stopCamera();
 
   try {
@@ -141,9 +98,8 @@ async function startCamera(statusEl, fallbackWrap) {
       await videoEl.play();
     }
   } catch (err) {
-    console.warn("Camera failed, fallback to file input.", err);
-    if (statusEl) statusEl.textContent = "⚠️ Kamera ikke tilgængeligt. Brug fil-upload.";
-    if (fallbackWrap) fallbackWrap.style.display = "block";
+    console.error(err);
+    throw new Error("camera_denied");
   }
 }
 
@@ -154,21 +110,25 @@ function stopCamera() {
     });
     stream = null;
   }
-  if (videoEl) {
-    try { videoEl.pause(); } catch {}
-    videoEl.srcObject = null;
+}
+
+function clearPhoto() {
+  photoBlob = null;
+
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
   }
+
+  if (photoImgEl) {
+    photoImgEl.src = "";
+    photoImgEl.style.display = "none";
+  }
+  if (videoEl) videoEl.style.display = "block";
 }
 
-function setButtonEnabled(btn, enabled) {
-  if (!btn) return;
-  btn.disabled = !enabled;
-  btn.style.opacity = enabled ? "1" : "0.6";
-}
-
-// Capture current frame into blob
-function takeSnapshot(statusEl, retryBtn, acceptBtn) {
-  if (!videoEl || !canvasEl || !imgEl) return;
+function takePhoto() {
+  if (!videoEl || !canvasEl) return;
 
   const w = videoEl.videoWidth || 640;
   const h = videoEl.videoHeight || 480;
@@ -179,46 +139,26 @@ function takeSnapshot(statusEl, retryBtn, acceptBtn) {
   const ctx = canvasEl.getContext("2d");
   ctx.drawImage(videoEl, 0, 0, w, h);
 
-  canvasEl.toBlob((blob) => {
-    if (!blob) {
-      if (statusEl) statusEl.textContent = "⚠️ Kunne ikke tage foto. Prøv igen.";
-      return;
-    }
+  return new Promise((resolve) => {
+    canvasEl.toBlob((blob) => {
+      photoBlob = blob;
 
-    capturedBlob = blob;
+      if (photoImgEl) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        previewUrl = URL.createObjectURL(blob);
+        photoImgEl.src = previewUrl;
+        photoImgEl.style.display = "block";
+      }
 
-    // show snapshot
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = URL.createObjectURL(blob);
-
-    imgEl.src = previewUrl;
-    imgEl.style.display = "block";
-    videoEl.style.display = "none";
-
-    setButtonEnabled(retryBtn, true);
-    setButtonEnabled(acceptBtn, true);
-
-    if (statusEl) statusEl.textContent = "✅ Foto taget. Tryk ‘Accepter’ for at sende.";
-  }, "image/jpeg", 0.9);
+      videoEl.style.display = "none";
+      resolve(blob);
+    }, "image/jpeg", 0.9);
+  });
 }
 
-function retrySnapshot(statusEl, retryBtn, acceptBtn) {
-  capturedBlob = null;
-
-  if (imgEl) imgEl.style.display = "none";
-  if (videoEl) videoEl.style.display = "block";
-
-  setButtonEnabled(retryBtn, false);
-  setButtonEnabled(acceptBtn, false);
-
-  if (statusEl) statusEl.textContent = "";
-}
-
-// Upload blob via /upload
 async function uploadBlob(blob) {
   const fd = new FormData();
-  const file = new File([blob], "kreanissen.jpg", { type: blob.type || "image/jpeg" });
-  fd.append("file", file);
+  fd.append("file", blob, "kreanissen.jpg");
 
   const res = await fetch("/upload", { method: "POST", body: fd });
   if (!res.ok) throw new Error("upload failed");
@@ -226,30 +166,42 @@ async function uploadBlob(blob) {
   return json.filename;
 }
 
-// ---------------- Render ----------------
-export function renderKreaNissen(ch, api, socket, myTeamName) {
+export function stopKreaNissen(api) {
+  if (timer) clearInterval(timer);
+  timer = null;
+
+  stopCamera();
+
+  if (popup) popup.remove();
+  popup = null;
+
+  hasSubmitted = false;
+  hasVoted = false;
+  clearPhoto();
+
+  api?.showStatus?.("");
+}
+
+export async function renderKreaNissen(ch, api, socket, myTeamName) {
   api.setBuzzEnabled(false);
 
   const pop = ensurePopup();
   pop.style.display = "flex";
 
+  // DOM inside popup
   const promptEl = pop.querySelector("#knPrompt");
   const timeLeftEl = pop.querySelector("#knTimeLeft");
+  const statusEl = pop.querySelector("#knStatus");
+  const voteWrap = pop.querySelector("#knVoteWrap");
+  const timerRow = pop.querySelector("#knTimerRow");
 
   videoEl = pop.querySelector("#knVideo");
-  imgEl = pop.querySelector("#knSnapshot");
   canvasEl = pop.querySelector("#knCanvas");
+  photoImgEl = pop.querySelector("#knPhotoPreview");
 
   const takeBtn = pop.querySelector("#knTakeBtn");
   const retryBtn = pop.querySelector("#knRetryBtn");
   const acceptBtn = pop.querySelector("#knAcceptBtn");
-
-  const fallbackWrap = pop.querySelector("#knFallbackWrap");
-  const fileInput = pop.querySelector("#knFileInput");
-  const sendFallbackBtn = pop.querySelector("#knSendFallbackBtn");
-
-  const statusEl = pop.querySelector("#knStatus");
-  const voteWrap = pop.querySelector("#knVoteWrap");
 
   promptEl.textContent = ch.text || "Lav noget kreativt og tag et billede!";
   voteWrap.innerHTML = "";
@@ -258,19 +210,77 @@ export function renderKreaNissen(ch, api, socket, myTeamName) {
   if (ch.phase === "creating") {
     hasVoted = false;
 
-    // Reset UI for new round
-    capturedBlob = null;
-    if (imgEl) imgEl.style.display = "none";
-    if (videoEl) videoEl.style.display = "block";
-    if (statusEl) statusEl.textContent = "";
+    timerRow.style.display = "block";
+    statusEl.textContent = hasSubmitted
+      ? "✅ Billede sendt. Vent på afstemning…"
+      : "";
 
-    setButtonEnabled(retryBtn, false);
-    setButtonEnabled(acceptBtn, false);
+    // reset UI for new round
+    clearPhoto();
+    retryBtn.disabled = true;
+    retryBtn.style.opacity = "0.6";
+    acceptBtn.disabled = true;
+    acceptBtn.style.opacity = "0.6";
 
-    // Start camera (or fallback)
-    if (fallbackWrap) fallbackWrap.style.display = "none";
-    startCamera(statusEl, fallbackWrap);
+    // start camera if not submitted
+    if (!hasSubmitted) {
+      try {
+        await startCamera();
+      } catch {
+        statusEl.textContent = "⚠️ Kamera kræver tilladelse.";
+      }
+    }
 
+    takeBtn.onclick = async () => {
+      if (hasSubmitted) return;
+      await takePhoto();
+      retryBtn.disabled = false;
+      retryBtn.style.opacity = "1";
+      acceptBtn.disabled = false;
+      acceptBtn.style.opacity = "1";
+    };
+
+    retryBtn.onclick = () => {
+      if (hasSubmitted) return;
+      clearPhoto();
+      retryBtn.disabled = true;
+      retryBtn.style.opacity = "0.6";
+      acceptBtn.disabled = true;
+      acceptBtn.style.opacity = "0.6";
+    };
+
+    acceptBtn.onclick = async () => {
+      if (hasSubmitted) return;
+
+      if (!photoBlob) {
+        statusEl.textContent = "Tag et foto først 🙂";
+        return;
+      }
+
+      hasSubmitted = true;
+      takeBtn.disabled = true;
+      retryBtn.disabled = true;
+      acceptBtn.disabled = true;
+      statusEl.textContent = "⏳ Sender billede…";
+
+      try {
+        const filename = await uploadBlob(photoBlob);
+        socket.emit("submitPhoto", { teamName: myTeamName, filename });
+
+        statusEl.textContent = "✅ Billede sendt!";
+        stopCamera();
+        setTimeout(() => (pop.style.display = "none"), 700);
+      } catch (e) {
+        console.error(e);
+        hasSubmitted = false;
+        takeBtn.disabled = false;
+        retryBtn.disabled = false;
+        acceptBtn.disabled = false;
+        statusEl.textContent = "⚠️ Upload fejlede. Prøv igen.";
+      }
+    };
+
+    // timer
     const startAt = ch.creatingStartAt;
     const total = ch.creatingSeconds || 180;
 
@@ -282,7 +292,15 @@ export function renderKreaNissen(ch, api, socket, myTeamName) {
       if (left <= 0) {
         clearInterval(timer);
         timer = null;
-        autoSubmit();
+
+        // Auto accept if photo already taken
+        if (!hasSubmitted && photoBlob) {
+          acceptBtn.click();
+        } else {
+          stopCamera();
+          statusEl.textContent = "⏰ Tiden er gået.";
+          setTimeout(() => (pop.style.display = "none"), 900);
+        }
       }
     }
 
@@ -290,124 +308,18 @@ export function renderKreaNissen(ch, api, socket, myTeamName) {
     if (!hasSubmitted) timer = setInterval(tick, 250);
     tick();
 
-    // Buttons
-    takeBtn.onclick = () => {
-      if (hasSubmitted) return;
-      takeSnapshot(statusEl, retryBtn, acceptBtn);
-    };
-
-    retryBtn.onclick = () => {
-      if (hasSubmitted) return;
-      retrySnapshot(statusEl, retryBtn, acceptBtn);
-    };
-
-    acceptBtn.onclick = async () => {
-      if (hasSubmitted) return;
-      if (!capturedBlob) return;
-
-      hasSubmitted = true;
-      setButtonEnabled(takeBtn, false);
-      setButtonEnabled(retryBtn, false);
-      setButtonEnabled(acceptBtn, false);
-      if (statusEl) statusEl.textContent = "⏳ Sender billede…";
-
-      try {
-        const filename = await uploadBlob(capturedBlob);
-        socket.emit("submitPhoto", { teamName: myTeamName, filename });
-        if (statusEl) statusEl.textContent = "✅ Billede sendt!";
-        stopCamera();
-        setTimeout(() => (pop.style.display = "none"), 600);
-      } catch {
-        hasSubmitted = false;
-        setButtonEnabled(takeBtn, true);
-        setButtonEnabled(retryBtn, !!capturedBlob);
-        setButtonEnabled(acceptBtn, !!capturedBlob);
-        if (statusEl) statusEl.textContent = "⚠️ Upload fejlede. Prøv igen.";
-      }
-    };
-
-    // Fallback upload (if camera fails)
-    if (sendFallbackBtn && fileInput) {
-      fileInput.onchange = () => {
-        const f = fileInput.files?.[0] || null;
-        if (!f) return;
-        capturedBlob = f; // treat as blob/file
-      };
-
-      sendFallbackBtn.onclick = async () => {
-        if (hasSubmitted) return;
-        const f = fileInput.files?.[0];
-        if (!f) {
-          statusEl.textContent = "Vælg et billede først 🙂";
-          return;
-        }
-
-        hasSubmitted = true;
-        sendFallbackBtn.disabled = true;
-        fileInput.disabled = true;
-        statusEl.textContent = "⏳ Sender billede…";
-
-        try {
-          const filename = await uploadBlob(f);
-          socket.emit("submitPhoto", { teamName: myTeamName, filename });
-          statusEl.textContent = "✅ Billede sendt!";
-          setTimeout(() => (pop.style.display = "none"), 600);
-        } catch {
-          hasSubmitted = false;
-          sendFallbackBtn.disabled = false;
-          fileInput.disabled = false;
-          statusEl.textContent = "⚠️ Upload fejlede. Prøv igen.";
-        }
-      };
-    }
-
-    async function autoSubmit() {
-      if (hasSubmitted) return;
-
-      // If they haven't accepted a photo, send nothing
-      if (!capturedBlob) {
-        hasSubmitted = true;
-        statusEl.textContent = "⏰ Tiden er gået – intet billede sendt.";
-        stopCamera();
-        setTimeout(() => (pop.style.display = "none"), 800);
-        return;
-      }
-
-      hasSubmitted = true;
-      setButtonEnabled(takeBtn, false);
-      setButtonEnabled(retryBtn, false);
-      setButtonEnabled(acceptBtn, false);
-      statusEl.textContent = "⏳ Sender billede…";
-
-      try {
-        const filename = await uploadBlob(capturedBlob);
-        socket.emit("submitPhoto", { teamName: myTeamName, filename });
-        statusEl.textContent = "✅ Billede sendt!";
-        stopCamera();
-        setTimeout(() => (pop.style.display = "none"), 600);
-      } catch {
-        statusEl.textContent = "⚠️ Upload fejlede ved timeout.";
-        stopCamera();
-        setTimeout(() => (pop.style.display = "none"), 800);
-      }
-    }
-
     return;
   }
 
   // ---------------- VOTING PHASE ----------------
   if (ch.phase === "voting") {
     stopCamera();
-
-    // hide camera UI
-    if (videoEl) videoEl.style.display = "none";
-    if (imgEl) imgEl.style.display = "none";
-
-    setButtonEnabled(takeBtn, false);
-    setButtonEnabled(retryBtn, false);
-    setButtonEnabled(acceptBtn, false);
-    if (fallbackWrap) fallbackWrap.style.display = "none";
-    timeLeftEl.parentElement.style.display = "none";
+    timerRow.style.display = "none";
+    videoEl.style.display = "none";
+    photoImgEl.style.display = "none";
+    takeBtn.style.display = "none";
+    retryBtn.style.display = "none";
+    acceptBtn.style.display = "none";
 
     statusEl.textContent = hasVoted
       ? "✅ Din stemme er afgivet!"
@@ -446,7 +358,6 @@ export function renderKreaNissen(ch, api, socket, myTeamName) {
       btn.onclick = () => {
         if (hasVoted || isMine) return;
         hasVoted = true;
-
         socket.emit("vote", i);
 
         api.showStatus("✅ Din stemme er afgivet!");
@@ -464,15 +375,12 @@ export function renderKreaNissen(ch, api, socket, myTeamName) {
   // ---------------- ENDED PHASE ----------------
   if (ch.phase === "ended") {
     stopCamera();
-
-    if (videoEl) videoEl.style.display = "none";
-    if (imgEl) imgEl.style.display = "none";
-
-    setButtonEnabled(takeBtn, false);
-    setButtonEnabled(retryBtn, false);
-    setButtonEnabled(acceptBtn, false);
-    if (fallbackWrap) fallbackWrap.style.display = "none";
-    timeLeftEl.parentElement.style.display = "none";
+    timerRow.style.display = "none";
+    videoEl.style.display = "none";
+    photoImgEl.style.display = "none";
+    takeBtn.style.display = "none";
+    retryBtn.style.display = "none";
+    acceptBtn.style.display = "none";
 
     const winners = ch.winners || [];
     statusEl.textContent = winners.length
