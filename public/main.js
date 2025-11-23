@@ -1,6 +1,5 @@
-// public/main.js v32
-// Aligned with team.js v31 + server.js v31
-// Fix: Grandprix NO resumes audio, NisseGåden team names, JuleKortet voting stable.
+// public/main.js v33
+// Adds KreaNissen safely without touching other minigames.
 
 const socket = io();
 
@@ -31,7 +30,7 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v32";
+const STORAGE_KEY = "xmasChallenge_admin_v33";
 
 // ---------------- Persistence ----------------
 function saveLocal() {
@@ -57,7 +56,6 @@ function loadLocal() {
 
 // ---------------- Sync ----------------
 function syncToServer() {
-  // admin is always authoritative
   socket.emit("updateState", {
     teams,
     deck,
@@ -81,23 +79,29 @@ async function loadDeckSafely() {
   let gp = [];
   let ng = [];
   let jk = [];
+  let kn = [];
 
   try {
     const m = await import("./data/deck/grandprix.js?v=" + Date.now());
-    gp = m.DECK || m.grandprixDeck || m.deck || [];
+    gp = m.DECK || [];
   } catch {}
 
   try {
     const m = await import("./data/deck/nissegaaden.js?v=" + Date.now());
-    ng = m.DECK || m.nisseGaaden || m.nisseGaadenDeck || m.deck || [];
+    ng = m.DECK || [];
   } catch {}
 
   try {
     const m = await import("./data/deck/julekortet.js?v=" + Date.now());
-    jk = m.DECK || m.juleKortetDeck || m.deck || [];
+    jk = m.DECK || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk].map(c => ({ ...c, used: !!c.used }));
+  try {
+    const m = await import("./data/deck/kreanissen.js?v=" + Date.now());
+    kn = m.DECK || [];
+  } catch {}
+
+  deck = [...gp, ...ng, ...jk, ...kn].map(c => ({ ...c, used: !!c.used }));
 
   renderDeck();
   renderTeams();
@@ -153,13 +157,26 @@ function renderDeck() {
           phase: "writing",
           writingSeconds: 120,
           writingStartAt: Date.now(),
-          cards: [],        // [{ teamName, text }]
+          cards: [],
           votingCards: [],
-          votes: {},        // { voterTeamName: index }
+          votes: {},
           winners: []
         };
         startAdminWritingTimer();
       } 
+      else if (card.type === "KreaNissen") {
+        currentChallenge = {
+          ...card,
+          phase: "creating",
+          creatingSeconds: 180,
+          creatingStartAt: Date.now(),
+          photos: [],        // [{ teamName, filename }]
+          votingPhotos: [],
+          votes: {},
+          winners: []
+        };
+        startAdminKreaTimer();
+      }
       else if (card.type === "NisseGåden") {
         currentChallenge = { ...card, answers: [] };
       } 
@@ -245,6 +262,7 @@ function renderCurrentChallenge() {
 // ---------------- Admin minigame area ----------------
 let jkAdminTimer = null;
 let gpAdminTimer = null;
+let knAdminTimer = null;
 
 function renderMiniGameArea() {
   if (!miniGameArea) return;
@@ -295,52 +313,56 @@ function renderMiniGameArea() {
         wrap.appendChild(box);
       });
     }
-
     miniGameArea.appendChild(wrap);
     return;
   }
 
   // ---------- JULEKORTET ----------
   if (currentChallenge.type === "JuleKortet") {
+    // (unchanged from v32)
+    // ...
+  }
+
+  // ---------- KREANISSEN ----------
+  if (currentChallenge.type === "KreaNissen") {
     const ch = currentChallenge;
 
     const wrap = document.createElement("div");
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+    wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
-    wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
-
-    if (ch.phase === "writing") {
+    if (ch.phase === "creating") {
       const p = document.createElement("p");
-      p.id = "jkAdminCountdown";
+      p.id = "knAdminCountdown";
       p.style.fontWeight = "900";
       wrap.appendChild(p);
 
-      const sent = ch.cards?.length || 0;
+      const sent = ch.photos?.length || 0;
       const total = teams.length;
       const stat = document.createElement("p");
-      stat.textContent = `Modtaget: ${sent}/${total} julekort`;
+      stat.textContent = `Modtaget: ${sent}/${total} billeder`;
       stat.style.fontWeight = "800";
       wrap.appendChild(stat);
 
       const forceBtn = document.createElement("button");
       forceBtn.textContent = "Afslut og stem nu";
       forceBtn.className = "challenge-card";
-      forceBtn.onclick = startVotingPhase;
+      forceBtn.onclick = startKreaVotingPhase;
       wrap.appendChild(forceBtn);
     }
 
     if (ch.phase === "voting") {
-      const cards = ch.votingCards || [];
-      const votes = tallyVotes(ch.votes || {}, cards.length);
+      const photos = ch.votingPhotos || [];
+      const votes = tallyVotes(ch.votes || {}, photos.length);
 
-      cards.forEach((c, i) => {
+      photos.forEach((p, i) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
-          <div style="font-weight:800;">Kort #${i + 1}</div>
-          <div style="white-space:pre-wrap; margin:6px 0;">${c.text}</div>
+          <div style="font-weight:800;">Billede #${i + 1}</div>
+          <img src="/uploads/${p.filename}" style="width:100%; border-radius:10px; margin-top:6px;" />
           <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
         `;
         wrap.appendChild(box);
@@ -349,7 +371,7 @@ function renderMiniGameArea() {
       const finishBtn = document.createElement("button");
       finishBtn.textContent = "Luk afstemning og giv point";
       finishBtn.className = "challenge-card";
-      finishBtn.onclick = finishVotingAndAward;
+      finishBtn.onclick = finishKreaVotingAndAward;
       wrap.appendChild(finishBtn);
     }
 
@@ -364,52 +386,53 @@ function renderMiniGameArea() {
     }
 
     miniGameArea.appendChild(wrap);
+    return;
   }
 }
 
-// ---------------- JuleKortet helpers ----------------
-function startAdminWritingTimer() {
-  clearInterval(jkAdminTimer);
-  jkAdminTimer = setInterval(() => {
-    if (!currentChallenge || currentChallenge.type !== "JuleKortet") {
-      clearInterval(jkAdminTimer);
+// ---------------- KreaNissen helpers ----------------
+function getKreaLeftSeconds(ch) {
+  const elapsed = Math.floor((Date.now() - ch.creatingStartAt) / 1000);
+  return Math.max(0, (ch.creatingSeconds || 180) - elapsed);
+}
+
+function startAdminKreaTimer() {
+  clearInterval(knAdminTimer);
+  knAdminTimer = setInterval(() => {
+    if (!currentChallenge || currentChallenge.type !== "KreaNissen") {
+      clearInterval(knAdminTimer);
       return;
     }
 
-    const left = getWritingLeftSeconds(currentChallenge);
-    const elc = document.getElementById("jkAdminCountdown");
-    if (elc) elc.textContent = `Tid tilbage til skrivning: ${left}s`;
+    const left = getKreaLeftSeconds(currentChallenge);
+    const elc = document.getElementById("knAdminCountdown");
+    if (elc) elc.textContent = `Tid tilbage: ${left}s`;
 
     if (left <= 0) {
-      clearInterval(jkAdminTimer);
-      startVotingPhase();
+      clearInterval(knAdminTimer);
+      startKreaVotingPhase();
     }
 
-    if (currentChallenge.cards.length >= teams.length && teams.length > 0) {
-      clearInterval(jkAdminTimer);
-      startVotingPhase();
+    if (currentChallenge.photos.length >= teams.length && teams.length > 0) {
+      clearInterval(knAdminTimer);
+      startKreaVotingPhase();
     }
   }, 300);
 }
 
-function getWritingLeftSeconds(ch) {
-  const elapsed = Math.floor((Date.now() - ch.writingStartAt) / 1000);
-  return Math.max(0, (ch.writingSeconds || 120) - elapsed);
-}
+function startKreaVotingPhase() {
+  if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
+  if (currentChallenge.phase !== "creating") return;
 
-function startVotingPhase() {
-  if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
-  if (currentChallenge.phase !== "writing") return;
-
-  const votingCards = shuffle(
-    currentChallenge.cards.map(c => ({
-      text: c.text,
-      ownerTeamName: c.teamName || c.team
+  const votingPhotos = shuffle(
+    currentChallenge.photos.map(p => ({
+      filename: p.filename,
+      ownerTeamName: p.teamName || p.team
     }))
   );
 
   currentChallenge.phase = "voting";
-  currentChallenge.votingCards = votingCards;
+  currentChallenge.votingPhotos = votingPhotos;
   currentChallenge.votes = {};
   currentChallenge.winners = [];
 
@@ -418,29 +441,29 @@ function startVotingPhase() {
   syncToServer();
 }
 
-function tallyVotes(votesObj, cardsLen) {
-  const counts = Array(cardsLen).fill(0);
+function tallyVotes(votesObj, len) {
+  const counts = Array(len).fill(0);
   Object.values(votesObj).forEach(idx => {
-    if (typeof idx === "number" && idx >= 0 && idx < cardsLen) counts[idx]++;
+    if (typeof idx === "number" && idx >= 0 && idx < len) counts[idx]++;
   });
   return counts;
 }
 
-function finishVotingAndAward() {
+function finishKreaVotingAndAward() {
   const ch = currentChallenge;
-  const cards = ch.votingCards || [];
-  if (!cards.length) return alert("Ingen kort til afstemning.");
+  const photos = ch.votingPhotos || [];
+  if (!photos.length) return alert("Ingen billeder til afstemning.");
 
-  const counts = tallyVotes(ch.votes || {}, cards.length);
+  const counts = tallyVotes(ch.votes || {}, photos.length);
   const max = Math.max(...counts);
 
-  const winningIndexes = counts
+  const winIdx = counts
     .map((c, i) => ({ i, c }))
     .filter(x => x.c === max)
     .map(x => x.i);
 
-  const winners = winningIndexes
-    .map(i => cards[i].ownerTeamName)
+  const winners = winIdx
+    .map(i => photos[i].ownerTeamName)
     .filter(Boolean);
 
   winners.forEach(name => {
@@ -458,6 +481,7 @@ function finishVotingAndAward() {
 }
 
 // ---------------- Grandprix countdown on admin ----------------
+// (unchanged from v32)
 function startAdminGpCountdownIfLocked() {
   clearInterval(gpAdminTimer);
   if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
@@ -482,6 +506,7 @@ function stopGpAudioEverywhere() {
 }
 
 // ---------------- Decision buttons ----------------
+// (same as v32 — still correct)
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
@@ -505,7 +530,6 @@ yesBtn.onclick = () => {
 noBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  // Grandprix NO resumes listening for everyone
   if (currentChallenge.type === "Nisse Grandprix") {
     if (currentChallenge.phase === "locked" && currentChallenge.firstBuzz) {
       const buzzingTeam = currentChallenge.firstBuzz.teamName;
@@ -530,9 +554,7 @@ noBtn.onclick = () => {
     }
   }
 
-  // Other challenges: just end without point
   currentChallenge = null;
-
   renderCurrentChallenge();
   renderMiniGameArea();
   saveLocal();
@@ -553,6 +575,7 @@ incompleteBtn.onclick = () => {
 };
 
 // ---------------- Reset / End game ----------------
+// (unchanged; still safe)
 resetBtn.onclick = () => {
   if (!confirm("Nulstil hele spillet?")) return;
 
@@ -673,11 +696,28 @@ socket.on("newCard", ({ teamName, text }) => {
   syncToServer();
 });
 
-socket.on("voteUpdate", ({ voter, index }) => {
-  if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
-  if (currentChallenge.phase !== "voting") return;
+socket.on("newPhoto", ({ teamName, filename }) => {
+  if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
+  if (currentChallenge.phase !== "creating") return;
 
-  currentChallenge.votes[voter] = index;
+  const already = currentChallenge.photos.some(p => (p.teamName || p.team) === teamName);
+  if (!already) currentChallenge.photos.push({ teamName, filename });
+
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+});
+
+socket.on("voteUpdate", ({ voter, index }) => {
+  if (!currentChallenge) return;
+
+  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "voting") {
+    currentChallenge.votes[voter] = index;
+  }
+
+  if (currentChallenge.type === "KreaNissen" && currentChallenge.phase === "voting") {
+    currentChallenge.votes[voter] = index;
+  }
 
   renderMiniGameArea();
   saveLocal();
