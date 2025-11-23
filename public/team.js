@@ -1,9 +1,9 @@
-// public/team.js v37
 
-import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
+// public/team.js v31
+
+import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
-import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js";
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -60,7 +60,7 @@ const api = {
 };
 
 // ===========================
-// JOIN step 1  (enter code)
+// JOIN step 1
 // ===========================
 codeBtn?.addEventListener("click", tryCode);
 codeInput?.addEventListener("keydown", (e) => {
@@ -73,9 +73,7 @@ function tryCode() {
     joinMsg.textContent = "Skriv en kode først.";
     return;
   }
-
   joinedCode = code;
-
   codeDisplay.textContent = code;
   joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
   nameRow.style.display = "flex";
@@ -83,7 +81,7 @@ function tryCode() {
 }
 
 // ===========================
-// JOIN step 2  (enter name)
+// JOIN step 2
 // ===========================
 nameBtn?.addEventListener("click", tryJoin);
 nameInput?.addEventListener("keydown", (e) => {
@@ -97,14 +95,7 @@ function tryJoin() {
     return;
   }
 
-  // ✅ Always prefer the server-shown code if available
-  const codeToSend = (codeDisplay?.textContent || joinedCode || "").trim();
-  if (!codeToSend) {
-    joinMsg.textContent = "Indtast kode først.";
-    return;
-  }
-
-  socket.emit("joinGame", { code: codeToSend, teamName: name }, (res) => {
+  socket.emit("joinGame", { code: joinedCode, teamName: name }, (res) => {
     if (!res?.ok) {
       joinMsg.textContent = res?.message || "Kunne ikke joine.";
       return;
@@ -130,6 +121,7 @@ buzzBtn?.addEventListener("click", async () => {
     try { await window.__grandprixAudio.play(); } catch {}
   }
 
+  // local fallback marker for "I buzzed"
   lastBuzzAt = Date.now();
   lastBuzzRoundId = window.__currentRoundId || null;
 
@@ -191,6 +183,7 @@ function ensureNisseGaadenAnswer() {
     const text = (ngInput.value || "").trim();
     if (!text) return;
 
+    // send teamName explicitly
     socket.emit("submitCard", { teamName: myTeamName, text });
 
     ngInput.value = "";
@@ -278,6 +271,7 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
+  // new round => reset local one-answer lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -329,7 +323,6 @@ function renderChallenge(ch) {
 
   stopNisseGaaden(api);
   stopJuleKortet(api);
-  stopKreaNissen(api);
 
   if (!ch) {
     stopGrandprix();
@@ -339,6 +332,7 @@ function renderChallenge(ch) {
     return;
   }
 
+  // store round id for local buzz fallback
   window.__currentRoundId = ch.id || null;
 
   challengeTitle.textContent = ch.type || "Udfordring";
@@ -362,11 +356,6 @@ function renderChallenge(ch) {
     return;
   }
 
-  if (ch.type === "KreaNissen") {
-    renderKreaNissen(ch, api, socket, myTeamName);
-    return;
-  }
-
   api.clearMiniGame();
 }
 
@@ -376,14 +365,7 @@ function renderChallenge(ch) {
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (s.gameCode) {
-    codeDisplay.textContent = s.gameCode;
-
-    // ✅ CRUCIAL FIX: keep local joinedCode synced with server
-    if (!joined) {
-      joinedCode = s.gameCode;
-    }
-  }
+  if (s.gameCode) codeDisplay.textContent = s.gameCode;
 
   renderLeaderboard(s.teams || []);
   renderChallenge(s.currentChallenge);
@@ -395,12 +377,14 @@ socket.on("state", (s) => {
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
+  // normal compare
   let iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
+  // fallback: if I buzzed this round within last 8s, treat as first
   if (!iAmFirstBuzz && isLockedGP) {
     const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
@@ -418,3 +402,4 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
