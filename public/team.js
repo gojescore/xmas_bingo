@@ -3,6 +3,8 @@
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
+import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js";
+
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -401,4 +403,5 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
 
