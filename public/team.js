@@ -1,4 +1,4 @@
-// public/team.js v36
+// public/team.js v37
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -60,7 +60,7 @@ const api = {
 };
 
 // ===========================
-// JOIN step 1
+// JOIN step 1  (enter code)
 // ===========================
 codeBtn?.addEventListener("click", tryCode);
 codeInput?.addEventListener("keydown", (e) => {
@@ -73,7 +73,9 @@ function tryCode() {
     joinMsg.textContent = "Skriv en kode først.";
     return;
   }
+
   joinedCode = code;
+
   codeDisplay.textContent = code;
   joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
   nameRow.style.display = "flex";
@@ -81,7 +83,7 @@ function tryCode() {
 }
 
 // ===========================
-// JOIN step 2
+// JOIN step 2  (enter name)
 // ===========================
 nameBtn?.addEventListener("click", tryJoin);
 nameInput?.addEventListener("keydown", (e) => {
@@ -95,7 +97,14 @@ function tryJoin() {
     return;
   }
 
-  socket.emit("joinGame", { code: joinedCode, teamName: name }, (res) => {
+  // ✅ Always prefer the server-shown code if available
+  const codeToSend = (codeDisplay?.textContent || joinedCode || "").trim();
+  if (!codeToSend) {
+    joinMsg.textContent = "Indtast kode først.";
+    return;
+  }
+
+  socket.emit("joinGame", { code: codeToSend, teamName: name }, (res) => {
     if (!res?.ok) {
       joinMsg.textContent = res?.message || "Kunne ikke joine.";
       return;
@@ -121,7 +130,6 @@ buzzBtn?.addEventListener("click", async () => {
     try { await window.__grandprixAudio.play(); } catch {}
   }
 
-  // local fallback marker for "I buzzed"
   lastBuzzAt = Date.now();
   lastBuzzRoundId = window.__currentRoundId || null;
 
@@ -368,7 +376,14 @@ function renderChallenge(ch) {
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (s.gameCode) codeDisplay.textContent = s.gameCode;
+  if (s.gameCode) {
+    codeDisplay.textContent = s.gameCode;
+
+    // ✅ CRUCIAL FIX: keep local joinedCode synced with server
+    if (!joined) {
+      joinedCode = s.gameCode;
+    }
+  }
 
   renderLeaderboard(s.teams || []);
   renderChallenge(s.currentChallenge);
