@@ -1,95 +1,45 @@
-// public/main.js v35  (ADMIN)
-// Stable startGame + safe gameCode + deck loader + logs
+// public/main.js v32
+// Aligned with team.js v31 + server.js v31
+// Fix: Grandprix NO resumes audio, NisseGåden team names, JuleKortet voting stable.
 
 const socket = io();
-console.log("[ADMIN] main.js loaded v35");
-
-socket.on("connect", () => {
-  console.log("[ADMIN] connected:", socket.id);
-});
 
 // ---------------- DOM ----------------
+const startGameBtn = document.getElementById("startGameBtn");
+const resetBtn = document.getElementById("resetBtn");
+const gameCodeValueEl = document.getElementById("gameCodeValue");
+
 const teamNameInput = document.getElementById("teamNameInput");
 const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
 
-const challengeGrid = document.getElementById("challengeGrid");
-const deckStatusEl = document.getElementById("deckStatus");
-
 const currentChallengeText = document.getElementById("currentChallengeText");
-
 const yesBtn = document.getElementById("yesBtn");
 const noBtn = document.getElementById("noBtn");
 const incompleteBtn = document.getElementById("incompleteBtn");
-
-const startGameBtn = document.getElementById("startGameBtn");
-const gameCodeValueEl = document.getElementById("gameCodeValue");
-
-const resetBtn = document.getElementById("resetBtn");
 const endGameBtn = document.getElementById("endGameBtn");
 const endGameResultEl = document.getElementById("endGameResult");
 
-const gpCountdownMain = document.getElementById("gpCountdownMain");
+const challengeGridEl = document.querySelector(".challenge-grid");
+const miniGameArea = document.getElementById("miniGameArea");
 
 // ---------------- STATE ----------------
-let gameCode = null;
 let teams = [];
+let selectedTeamId = null;
+
 let deck = [];
 let currentChallenge = null;
-let selectedTeamId = null;
-let nextTeamId = 1;
+let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v35";
+const STORAGE_KEY = "xmasChallenge_admin_v32";
 
-// ---------------- DECK LOADER ----------------
-// All deck files MUST export: export const DECK = [...]
-const deckModules = [
-  "./data/deck/grandprix.js",
-  "./data/deck/nissegaaden.js",
-  "./data/deck/julekortet.js",
-  "./data/deck/kreanissen.js",
-];
-
-async function loadDeckFromFiles() {
-  const all = [];
-
-  for (const path of deckModules) {
-    try {
-      const mod = await import(path + "?v=" + Date.now());
-      const arr = mod.DECK || mod.default || [];
-      if (!Array.isArray(arr)) continue;
-
-      arr.forEach(c => {
-        all.push({
-          used: false,
-          ...c,
-        });
-      });
-    } catch (e) {
-      console.warn("[ADMIN] Could not load deck:", path, e);
-    }
-  }
-
-  // unique by id
-  const seen = new Set();
-  deck = all.filter(c => {
-    if (!c.id) return false;
-    if (seen.has(c.id)) return false;
-    seen.add(c.id);
-    return true;
-  });
-
-  console.log("[ADMIN] Deck loaded:", deck.length, "cards");
-  renderDeck();
-  syncToServer();
-}
-
-// ---------------- SAVE/LOAD LOCAL ----------------
+// ---------------- Persistence ----------------
 function saveLocal() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      gameCode, teams, deck, currentChallenge, nextTeamId
-    }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ teams, deck, currentChallenge, gameCode })
+    );
   } catch {}
 }
 
@@ -98,331 +48,665 @@ function loadLocal() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const s = JSON.parse(raw);
-    if (s.gameCode) gameCode = s.gameCode;
     if (Array.isArray(s.teams)) teams = s.teams;
     if (Array.isArray(s.deck)) deck = s.deck;
-    if (s.currentChallenge !== undefined) currentChallenge = s.currentChallenge;
-    if (typeof s.nextTeamId === "number") nextTeamId = s.nextTeamId;
+    currentChallenge = s.currentChallenge || null;
+    gameCode = s.gameCode || null;
   } catch {}
 }
 
-// ---------------- SYNC TO SERVER ----------------
+// ---------------- Sync ----------------
 function syncToServer() {
-  const serverState = {
-    gameCode,         // ✅ always send real code if we have it
+  // admin is always authoritative
+  socket.emit("updateState", {
     teams,
     deck,
     currentChallenge,
-  };
-  socket.emit("updateState", serverState);
+    gameCode
+  });
 }
 
-// ---------------- RENDER ----------------
-function renderLeaderboard() {
-  const sorted = [...teams].sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    return a.name.localeCompare(b.name);
+// ---------------- Utilities ----------------
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ---------------- Deck load ----------------
+async function loadDeckSafely() {
+  let gp = [];
+  let ng = [];
+  let jk = [];
+
+  try {
+    const m = await import("./data/deck/grandprix.js?v=" + Date.now());
+    gp = m.DECK || m.grandprixDeck || m.deck || [];
+  } catch {}
+
+  try {
+    const m = await import("./data/deck/nissegaaden.js?v=" + Date.now());
+    ng = m.DECK || m.nisseGaaden || m.nisseGaadenDeck || m.deck || [];
+  } catch {}
+
+  try {
+    const m = await import("./data/deck/julekortet.js?v=" + Date.now());
+    jk = m.DECK || m.juleKortetDeck || m.deck || [];
+  } catch {}
+
+  deck = [...gp, ...ng, ...jk].map(c => ({ ...c, used: !!c.used }));
+
+  renderDeck();
+  renderTeams();
+  renderCurrentChallenge();
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+}
+
+// ---------------- Render deck ----------------
+function renderDeck() {
+  if (!challengeGridEl) return;
+  challengeGridEl.innerHTML = "";
+
+  if (!deck.length) {
+    const p = document.createElement("p");
+    p.textContent = "⚠️ Ingen udfordringer fundet (deck tom).";
+    p.style.fontWeight = "900";
+    p.style.color = "crimson";
+    challengeGridEl.appendChild(p);
+    return;
+  }
+
+  deck.forEach(card => {
+    const btn = document.createElement("button");
+    btn.className = "challenge-card";
+    btn.textContent = card.title || card.type;
+
+    if (card.used) {
+      btn.style.opacity = "0.45";
+      btn.style.textDecoration = "line-through";
+    }
+
+    btn.onclick = () => {
+      if (card.used) return alert("Denne udfordring er allerede brugt.");
+      card.used = true;
+
+      if (card.type === "Nisse Grandprix") {
+        currentChallenge = {
+          ...card,
+          phase: "listening",
+          startAt: Date.now() + 3000,
+          firstBuzz: null,
+          countdownSeconds: 20,
+          countdownStartAt: null,
+          typedAnswer: null,
+          answeredTeams: {}
+        };
+      } 
+      else if (card.type === "JuleKortet") {
+        currentChallenge = {
+          ...card,
+          phase: "writing",
+          writingSeconds: 120,
+          writingStartAt: Date.now(),
+          cards: [],        // [{ teamName, text }]
+          votingCards: [],
+          votes: {},        // { voterTeamName: index }
+          winners: []
+        };
+        startAdminWritingTimer();
+      } 
+      else if (card.type === "NisseGåden") {
+        currentChallenge = { ...card, answers: [] };
+      } 
+      else {
+        currentChallenge = { ...card };
+      }
+
+      selectedTeamId = null;
+      endGameResultEl.textContent = "";
+
+      renderDeck();
+      renderTeams();
+      renderCurrentChallenge();
+      renderMiniGameArea();
+      saveLocal();
+      syncToServer();
+    };
+
+    challengeGridEl.appendChild(btn);
+  });
+}
+
+// ---------------- Leaderboard ----------------
+function renderTeams() {
+  const sorted = [...teams].sort((a,b) => {
+    if ((b.points ?? 0) !== (a.points ?? 0))
+      return (b.points ?? 0) - (a.points ?? 0);
+    return (a.name || "").localeCompare(b.name || "");
   });
 
   teamListEl.innerHTML = "";
 
   sorted.forEach(team => {
     const li = document.createElement("li");
-    li.className = "team-item" + (team.id === selectedTeamId ? " selected" : "");
+    li.className =
+      "team-item" + (team.id === selectedTeamId ? " selected" : "");
 
-    const left = document.createElement("span");
-    left.className = "team-name";
-    left.textContent = team.name;
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "team-name";
+    nameSpan.textContent = team.name;
 
-    const right = document.createElement("div");
-    right.className = "team-points";
+    const pointsDiv = document.createElement("div");
+    pointsDiv.className = "team-points";
 
     const minus = document.createElement("button");
     minus.textContent = "−";
-    minus.onclick = (e) => { e.stopPropagation(); changePoints(team.id, -1); };
+    minus.onclick = (e) => {
+      e.stopPropagation();
+      team.points = Math.max(0, (team.points ?? 0) - 1);
+      saveLocal(); renderTeams(); syncToServer();
+    };
 
-    const pts = document.createElement("span");
-    pts.textContent = team.points;
+    const val = document.createElement("span");
+    val.textContent = team.points ?? 0;
 
     const plus = document.createElement("button");
     plus.textContent = "+";
-    plus.onclick = (e) => { e.stopPropagation(); changePoints(team.id, 1); };
+    plus.onclick = (e) => {
+      e.stopPropagation();
+      team.points = (team.points ?? 0) + 1;
+      saveLocal(); renderTeams(); syncToServer();
+    };
 
-    right.append(minus, pts, plus);
+    pointsDiv.append(minus, val, plus);
+    li.append(nameSpan, pointsDiv);
 
-    li.append(left, right);
-    li.onclick = () => { selectedTeamId = team.id; renderLeaderboard(); };
+    li.onclick = () => {
+      selectedTeamId = team.id;
+      renderTeams();
+    };
 
     teamListEl.appendChild(li);
   });
 }
 
-function renderDeck() {
-  challengeGrid.innerHTML = "";
-
-  if (!deck.length) {
-    deckStatusEl.textContent = "⚠️ Ingen udfordringer fundet (deck tom).";
-    return;
-  }
-
-  deckStatusEl.textContent = "";
-
-  deck.forEach(card => {
-    const btn = document.createElement("button");
-    btn.className = "challenge-card";
-    btn.dataset.id = card.id;
-    btn.textContent = card.title || card.id;
-
-    if (card.used) btn.style.opacity = "0.35";
-
-    btn.onclick = () => selectChallenge(card.id);
-
-    challengeGrid.appendChild(btn);
-  });
-}
-
-function renderCurrentChallengeText() {
+// ---------------- Current challenge text ----------------
+function renderCurrentChallenge() {
   currentChallengeText.textContent = currentChallenge
     ? `Aktuel udfordring: ${currentChallenge.title || currentChallenge.type}`
     : "Ingen udfordring valgt endnu.";
 }
 
-// ---------------- TEAMS ----------------
-function addTeam(name) {
-  const trimmed = name.trim();
-  if (!trimmed) return;
+// ---------------- Admin minigame area ----------------
+let jkAdminTimer = null;
+let gpAdminTimer = null;
 
-  if (teams.some(t => t.name.trim().toLowerCase() === trimmed.toLowerCase())) {
-    alert("Navnet er allerede taget.");
+function renderMiniGameArea() {
+  if (!miniGameArea) return;
+  miniGameArea.innerHTML = "";
+  if (!currentChallenge) return;
+
+  // ---------- GRANDPRIX ----------
+  if (currentChallenge.type === "Nisse Grandprix") {
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+
+    wrap.innerHTML = `
+      <h3>Nisse Grandprix</h3>
+      <p><strong>Fase:</strong> ${currentChallenge.phase}</p>
+      <p><strong>Buzzed først:</strong> ${currentChallenge.firstBuzz?.teamName || "—"}</p>
+      <p><strong>Svar fra:</strong> ${currentChallenge.typedAnswer?.teamName || "—"}</p>
+      <p><strong>Tekst:</strong> ${currentChallenge.typedAnswer?.text || "—"}</p>
+      <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
+    `;
+    miniGameArea.appendChild(wrap);
+    startAdminGpCountdownIfLocked();
     return;
   }
 
-  teams.push({
-    id: nextTeamId++,
-    name: trimmed,
-    points: 0,
+  // ---------- NISSEGÅDEN ----------
+  if (currentChallenge.type === "NisseGåden") {
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+
+    wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
+    const answers = currentChallenge.answers || [];
+
+    if (!answers.length) {
+      const p = document.createElement("p");
+      p.textContent = "Ingen svar endnu…";
+      wrap.appendChild(p);
+    } else {
+      answers.forEach(a => {
+        const box = document.createElement("div");
+        box.style.cssText =
+          "padding:8px; border:1px solid #ddd; border-radius:8px; margin-bottom:6px; background:#fff;";
+        box.innerHTML = `
+          <div><strong>${a.teamName || a.team || "Ukendt hold"}</strong>:</div>
+          <div>${a.text}</div>
+        `;
+        wrap.appendChild(box);
+      });
+    }
+
+    miniGameArea.appendChild(wrap);
+    return;
+  }
+
+  // ---------- JULEKORTET ----------
+  if (currentChallenge.type === "JuleKortet") {
+    const ch = currentChallenge;
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+
+    wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
+
+    if (ch.phase === "writing") {
+      const p = document.createElement("p");
+      p.id = "jkAdminCountdown";
+      p.style.fontWeight = "900";
+      wrap.appendChild(p);
+
+      const sent = ch.cards?.length || 0;
+      const total = teams.length;
+      const stat = document.createElement("p");
+      stat.textContent = `Modtaget: ${sent}/${total} julekort`;
+      stat.style.fontWeight = "800";
+      wrap.appendChild(stat);
+
+      const forceBtn = document.createElement("button");
+      forceBtn.textContent = "Afslut og stem nu";
+      forceBtn.className = "challenge-card";
+      forceBtn.onclick = startVotingPhase;
+      wrap.appendChild(forceBtn);
+    }
+
+    if (ch.phase === "voting") {
+      const cards = ch.votingCards || [];
+      const votes = tallyVotes(ch.votes || {}, cards.length);
+
+      cards.forEach((c, i) => {
+        const box = document.createElement("div");
+        box.style.cssText =
+          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.innerHTML = `
+          <div style="font-weight:800;">Kort #${i + 1}</div>
+          <div style="white-space:pre-wrap; margin:6px 0;">${c.text}</div>
+          <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
+        `;
+        wrap.appendChild(box);
+      });
+
+      const finishBtn = document.createElement("button");
+      finishBtn.textContent = "Luk afstemning og giv point";
+      finishBtn.className = "challenge-card";
+      finishBtn.onclick = finishVotingAndAward;
+      wrap.appendChild(finishBtn);
+    }
+
+    if (ch.phase === "ended") {
+      const winners = ch.winners || [];
+      const p = document.createElement("p");
+      p.style.fontWeight = "900";
+      p.textContent = winners.length
+        ? `Vindere: ${winners.join(", ")}`
+        : "Ingen vinder fundet.";
+      wrap.appendChild(p);
+    }
+
+    miniGameArea.appendChild(wrap);
+  }
+}
+
+// ---------------- JuleKortet helpers ----------------
+function startAdminWritingTimer() {
+  clearInterval(jkAdminTimer);
+  jkAdminTimer = setInterval(() => {
+    if (!currentChallenge || currentChallenge.type !== "JuleKortet") {
+      clearInterval(jkAdminTimer);
+      return;
+    }
+
+    const left = getWritingLeftSeconds(currentChallenge);
+    const elc = document.getElementById("jkAdminCountdown");
+    if (elc) elc.textContent = `Tid tilbage til skrivning: ${left}s`;
+
+    if (left <= 0) {
+      clearInterval(jkAdminTimer);
+      startVotingPhase();
+    }
+
+    if (currentChallenge.cards.length >= teams.length && teams.length > 0) {
+      clearInterval(jkAdminTimer);
+      startVotingPhase();
+    }
+  }, 300);
+}
+
+function getWritingLeftSeconds(ch) {
+  const elapsed = Math.floor((Date.now() - ch.writingStartAt) / 1000);
+  return Math.max(0, (ch.writingSeconds || 120) - elapsed);
+}
+
+function startVotingPhase() {
+  if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
+  if (currentChallenge.phase !== "writing") return;
+
+  const votingCards = shuffle(
+    currentChallenge.cards.map(c => ({
+      text: c.text,
+      ownerTeamName: c.teamName || c.team
+    }))
+  );
+
+  currentChallenge.phase = "voting";
+  currentChallenge.votingCards = votingCards;
+  currentChallenge.votes = {};
+  currentChallenge.winners = [];
+
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+}
+
+function tallyVotes(votesObj, cardsLen) {
+  const counts = Array(cardsLen).fill(0);
+  Object.values(votesObj).forEach(idx => {
+    if (typeof idx === "number" && idx >= 0 && idx < cardsLen) counts[idx]++;
+  });
+  return counts;
+}
+
+function finishVotingAndAward() {
+  const ch = currentChallenge;
+  const cards = ch.votingCards || [];
+  if (!cards.length) return alert("Ingen kort til afstemning.");
+
+  const counts = tallyVotes(ch.votes || {}, cards.length);
+  const max = Math.max(...counts);
+
+  const winningIndexes = counts
+    .map((c, i) => ({ i, c }))
+    .filter(x => x.c === max)
+    .map(x => x.i);
+
+  const winners = winningIndexes
+    .map(i => cards[i].ownerTeamName)
+    .filter(Boolean);
+
+  winners.forEach(name => {
+    const t = teams.find(x => x.name === name);
+    if (t) t.points = (t.points ?? 0) + 1;
   });
 
-  selectedTeamId = null;
-  teamNameInput.value = "";
+  ch.phase = "ended";
+  ch.winners = winners;
+
+  renderTeams();
+  renderMiniGameArea();
   saveLocal();
-  renderLeaderboard();
   syncToServer();
 }
 
-function changePoints(teamId, delta) {
-  const t = teams.find(x => x.id === teamId);
-  if (!t) return;
-  t.points += delta;
-  saveLocal();
-  renderLeaderboard();
-  syncToServer();
+// ---------------- Grandprix countdown on admin ----------------
+function startAdminGpCountdownIfLocked() {
+  clearInterval(gpAdminTimer);
+  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
+  if (currentChallenge.phase !== "locked") return;
+  if (!currentChallenge.countdownStartAt) return;
+
+  gpAdminTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - currentChallenge.countdownStartAt) / 1000);
+    const left = Math.max(0, (currentChallenge.countdownSeconds || 20) - elapsed);
+    const elc = document.getElementById("gpAdminCountdown");
+    if (elc) elc.textContent = left;
+    if (left <= 0) clearInterval(gpAdminTimer);
+  }, 200);
 }
 
-// ---------------- CHALLENGE SELECT ----------------
-function selectChallenge(id) {
-  const card = deck.find(c => c.id === id);
-  if (!card || card.used) return;
-
-  // mark used
-  card.used = true;
-
-  // create live challenge state
-  currentChallenge = {
-    ...card,
-    phase: card.type === "Nisse Grandprix" ? "listening" : "showing",
-    startAt: Date.now() + 1200, // small sync delay
-    countdownSeconds: 20,
-  };
-
-  saveLocal();
-  renderDeck();
-  renderCurrentChallengeText();
-  syncToServer();
-}
-
-// ---------------- GRANDPRIX COUNTDOWN ON MAIN ----------------
-let countdownTimer = null;
-function updateGpCountdown(ch) {
-  if (!ch || ch.type !== "Nisse Grandprix" || ch.phase !== "locked" || !ch.countdownStartAt) {
-    gpCountdownMain.style.display = "none";
-    if (countdownTimer) clearInterval(countdownTimer);
-    countdownTimer = null;
-    return;
-  }
-
-  gpCountdownMain.style.display = "inline-block";
-
-  const startAt = ch.countdownStartAt;
-  const total = ch.countdownSeconds || 20;
-
-  const tick = () => {
-    const elapsed = Math.floor((Date.now() - startAt) / 1000);
-    const left = Math.max(0, total - elapsed);
-    gpCountdownMain.textContent = left;
-    if (left <= 0) {
-      clearInterval(countdownTimer);
-      countdownTimer = null;
-    }
-  };
-
-  tick();
-  if (countdownTimer) clearInterval(countdownTimer);
-  countdownTimer = setInterval(tick, 250);
-}
-
-// ---------------- YES / NO / INCOMPLETE ----------------
+// ---------------- Stop GP audio everywhere ----------------
 function stopGpAudioEverywhere() {
   socket.emit("gp-stop-audio-now");
+  if (currentChallenge?.type === "Nisse Grandprix") {
+    currentChallenge.phase = "ended";
+  }
 }
 
+// ---------------- Decision buttons ----------------
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
-  if (!selectedTeamId) return alert("Vælg vinderholdet først.");
+  if (!selectedTeamId) return alert("Vælg vinderholdet.");
 
-  changePoints(selectedTeamId, 1);
   stopGpAudioEverywhere();
 
+  const t = teams.find(x => x.id === selectedTeamId);
+  if (t) t.points = (t.points ?? 0) + 1;
+
   currentChallenge = null;
+  selectedTeamId = null;
+
+  renderTeams();
+  renderDeck();
+  renderCurrentChallenge();
+  renderMiniGameArea();
   saveLocal();
-  renderCurrentChallengeText();
   syncToServer();
 };
 
 noBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  // If GP locked, resume listening
+  // Grandprix NO resumes listening for everyone
   if (currentChallenge.type === "Nisse Grandprix") {
-    currentChallenge.phase = "listening";
-    currentChallenge.startAt = Date.now() + 1000;
-    delete currentChallenge.firstBuzz;
-    delete currentChallenge.countdownStartAt;
-    stopGpAudioEverywhere(); // stops now; teams will restart on new phase
-    saveLocal();
-    syncToServer();
-    return;
+    if (currentChallenge.phase === "locked" && currentChallenge.firstBuzz) {
+      const buzzingTeam = currentChallenge.firstBuzz.teamName;
+
+      currentChallenge.answeredTeams =
+        currentChallenge.answeredTeams || {};
+      currentChallenge.answeredTeams[buzzingTeam] = true;
+
+      currentChallenge.phase = "listening";
+      currentChallenge.firstBuzz = null;
+      currentChallenge.countdownStartAt = null;
+      currentChallenge.typedAnswer = null;
+
+      selectedTeamId = null;
+
+      renderTeams();
+      renderCurrentChallenge();
+      renderMiniGameArea();
+      saveLocal();
+      syncToServer();
+      return;
+    }
   }
 
-  stopGpAudioEverywhere();
+  // Other challenges: just end without point
   currentChallenge = null;
+
+  renderCurrentChallenge();
+  renderMiniGameArea();
   saveLocal();
-  renderCurrentChallengeText();
   syncToServer();
 };
 
 incompleteBtn.onclick = () => {
-  if (!currentChallenge) return alert("Vælg en udfordring først.");
+  if (!currentChallenge) return;
+
   stopGpAudioEverywhere();
   currentChallenge = null;
+  selectedTeamId = null;
+
+  renderCurrentChallenge();
+  renderMiniGameArea();
   saveLocal();
-  renderCurrentChallengeText();
   syncToServer();
 };
 
-// ---------------- START / RESET / END ----------------
-startGameBtn.onclick = () => {
-  console.log("[ADMIN] startGame clicked -> emitting startGame");
-
-  socket.emit("startGame", (res) => {
-    console.log("[ADMIN] startGame ack:", res);
-
-    if (!res?.ok) {
-      alert("Kunne ikke starte spil.");
-      return;
-    }
-
-    gameCode = res.gameCode;
-    gameCodeValueEl.textContent = gameCode;
-
-    teams = [];
-    currentChallenge = null;
-    selectedTeamId = null;
-    nextTeamId = 1;
-
-    loadDeckFromFiles();
-    saveLocal();
-    renderLeaderboard();
-    renderCurrentChallengeText();
-    syncToServer();
-  });
-};
-
+// ---------------- Reset / End game ----------------
 resetBtn.onclick = () => {
-  if (!confirm("Nulstil alle hold og point?")) return;
+  if (!confirm("Nulstil hele spillet?")) return;
+
   stopGpAudioEverywhere();
+
   teams = [];
-  currentChallenge = null;
   selectedTeamId = null;
-  nextTeamId = 1;
-  deck.forEach(c => c.used = false);
-  saveLocal();
+  currentChallenge = null;
+  deck.forEach(c => (c.used = false));
+  endGameResultEl.textContent = "";
+
+  renderTeams();
   renderDeck();
-  renderLeaderboard();
-  renderCurrentChallengeText();
+  renderCurrentChallenge();
+  renderMiniGameArea();
+
+  saveLocal();
   syncToServer();
 };
 
 endGameBtn.onclick = () => {
+  if (!teams.length) return alert("Ingen hold endnu.");
+
   stopGpAudioEverywhere();
 
-  if (!teams.length) return;
-  const sorted = [...teams].sort((a, b) => b.points - a.points);
-  const top = sorted[0].points;
-  const winners = sorted.filter(t => t.points === top);
+  const sorted = [...teams].sort((a,b)=>(b.points??0)-(a.points??0));
+  const topScore = sorted[0].points;
+  const winners = sorted.filter(t => t.points === topScore);
 
-  if (winners.length === 1) {
-    endGameResultEl.textContent = `Vinderen er: ${winners[0].name} med ${top} point! 🎉`;
-  } else {
-    endGameResultEl.textContent = `Uafgjort mellem: ${winners.map(w => w.name).join(", ")} (${top} point)`;
-  }
+  endGameResultEl.textContent =
+    winners.length === 1
+      ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
+      : `Uafgjort: ${winners.map(x => x.name).join(", ")} – ${topScore} point.`;
 
-  // reset deck for new game
-  deck.forEach(c => c.used = false);
-  currentChallenge = null;
   saveLocal();
-  renderDeck();
-  renderCurrentChallengeText();
   syncToServer();
 };
 
-// ---------------- SOCKET STATE ----------------
-socket.on("state", (serverState) => {
-  console.log("[ADMIN] state received:", serverState);
+// ---------------- Start game ----------------
+startGameBtn.onclick = () => {
+  gameCode = String(Math.floor(1000 + Math.random() * 9000));
+  gameCodeValueEl.textContent = gameCode;
 
-  if (!serverState) return;
-
-  // Take server gameCode if present
-  if (serverState.gameCode) {
-    gameCode = serverState.gameCode;
-    gameCodeValueEl.textContent = gameCode;
-  }
-
-  if (Array.isArray(serverState.teams)) teams = serverState.teams;
-  if (Array.isArray(serverState.deck) && serverState.deck.length) deck = serverState.deck;
-  currentChallenge = serverState.currentChallenge ?? null;
-
-  // rebuild nextTeamId
-  const maxId = teams.reduce((m, t) => Math.max(m, t.id || 0), 0);
-  nextTeamId = maxId + 1;
+  teams = [];
+  selectedTeamId = null;
+  currentChallenge = null;
 
   saveLocal();
+  syncToServer();
+};
+
+// ---------------- Add team manually (optional) ----------------
+addTeamBtn.onclick = () => {
+  const name = teamNameInput.value.trim();
+  if (!name) return;
+
+  if (teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+    alert("Navnet findes allerede.");
+    return;
+  }
+
+  teams.push({ id: "t" + Date.now() + Math.random(), name, points: 0 });
+  teamNameInput.value = "";
+
+  renderTeams();
+  saveLocal();
+  syncToServer();
+};
+
+// ---------------- SOCKET LISTENERS ----------------
+socket.on("buzzed", (teamName) => {
+  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
+  if (currentChallenge.phase !== "listening") return;
+  if (currentChallenge.firstBuzz) return;
+
+  currentChallenge.phase = "locked";
+  currentChallenge.firstBuzz = { teamName };
+  currentChallenge.countdownStartAt = Date.now();
+  currentChallenge.typedAnswer = null;
+
+  const t = teams.find(x => x.name === teamName);
+  if (t) selectedTeamId = t.id;
+
+  renderTeams();
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+});
+
+socket.on("gp-typed-answer", ({ teamName, text }) => {
+  if (!currentChallenge || currentChallenge.type !== "Nisse Grandprix") return;
+
+  currentChallenge.answeredTeams = currentChallenge.answeredTeams || {};
+  if (currentChallenge.answeredTeams[teamName]) return;
+
+  currentChallenge.answeredTeams[teamName] = true;
+  currentChallenge.typedAnswer = { teamName, text };
+
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+});
+
+socket.on("newCard", ({ teamName, text }) => {
+  if (!currentChallenge) return;
+
+  if (currentChallenge.type === "NisseGåden") {
+    currentChallenge.answers.push({ teamName, text });
+  }
+
+  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
+    const already = currentChallenge.cards.some(c => (c.teamName || c.team) === teamName);
+    if (!already) currentChallenge.cards.push({ teamName, text });
+  }
+
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+});
+
+socket.on("voteUpdate", ({ voter, index }) => {
+  if (!currentChallenge || currentChallenge.type !== "JuleKortet") return;
+  if (currentChallenge.phase !== "voting") return;
+
+  currentChallenge.votes[voter] = index;
+
+  renderMiniGameArea();
+  saveLocal();
+  syncToServer();
+});
+
+socket.on("state", (s) => {
+  if (!s) return;
+
+  if (Array.isArray(s.teams)) teams = s.teams;
+  if (Array.isArray(s.deck)) deck = s.deck;
+  if (s.currentChallenge !== undefined) currentChallenge = s.currentChallenge;
+  if (s.gameCode !== undefined) gameCode = s.gameCode;
+
+  if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
+  renderTeams();
   renderDeck();
-  renderLeaderboard();
-  renderCurrentChallengeText();
-  updateGpCountdown(currentChallenge);
+  renderCurrentChallenge();
+  renderMiniGameArea();
+
+  saveLocal();
 });
 
 // ---------------- INIT ----------------
 loadLocal();
+renderTeams();
 renderDeck();
-renderLeaderboard();
-renderCurrentChallengeText();
-
-addTeamBtn.onclick = () => addTeam(teamNameInput.value);
-teamNameInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") addTeam(teamNameInput.value);
-});
-
-// If no deck locally, load from files on first boot
-if (!deck.length) loadDeckFromFiles();
+renderCurrentChallenge();
+renderMiniGameArea();
+await loadDeckSafely();
+if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
