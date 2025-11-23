@@ -1,11 +1,9 @@
-// public/team.js v31
-console.log("[TEAM] team.js loaded OK");
+// public/team.js v36
 
-import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
+import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js";
-
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -185,7 +183,6 @@ function ensureNisseGaadenAnswer() {
     const text = (ngInput.value || "").trim();
     if (!text) return;
 
-    // send teamName explicitly
     socket.emit("submitCard", { teamName: myTeamName, text });
 
     ngInput.value = "";
@@ -273,7 +270,6 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
-  // new round => reset local one-answer lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -327,12 +323,6 @@ function renderChallenge(ch) {
   stopJuleKortet(api);
   stopKreaNissen(api);
 
-  if (ch.type === "KreaNissen") {
-  renderKreaNissen(ch, api, socket, myTeamName);
-  return;
-}
-
-
   if (!ch) {
     stopGrandprix();
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -341,7 +331,6 @@ function renderChallenge(ch) {
     return;
   }
 
-  // store round id for local buzz fallback
   window.__currentRoundId = ch.id || null;
 
   challengeTitle.textContent = ch.type || "Udfordring";
@@ -362,6 +351,11 @@ function renderChallenge(ch) {
 
   if (ch.type === "JuleKortet") {
     renderJuleKortet(ch, api, socket, myTeamName);
+    return;
+  }
+
+  if (ch.type === "KreaNissen") {
+    renderKreaNissen(ch, api, socket, myTeamName);
     return;
   }
 
@@ -386,14 +380,12 @@ socket.on("state", (s) => {
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
-  // normal compare
   let iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
-  // fallback: if I buzzed this round within last 8s, treat as first
   if (!iAmFirstBuzz && isLockedGP) {
     const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
@@ -411,7 +403,3 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
-
-
-
-
