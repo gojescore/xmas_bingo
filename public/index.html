@@ -4,21 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Xmas Challenge – Main Control</title>
-
-  <!-- CSS in same folder -->
-  <link rel="stylesheet" href="style.css?v=8" />
+  <link rel="stylesheet" href="style.css?v=35" />
 </head>
 <body>
   <div class="app">
 
-    <!-- HEADER -->
     <header class="app-header">
       <div class="header-main">
         <h1>🎄 Xmas Challenge – Game Master</h1>
         <p>Opret hold, vælg udfordringer og styr pointene.</p>
       </div>
 
-      <!-- Start game + code -->
       <div class="game-code-box">
         <button id="startGameBtn" class="start-game-btn">▶ Start Xmas Challenge</button>
         <div id="gameCodeDisplay" class="game-code-display">
@@ -30,11 +26,9 @@
     </header>
 
     <main class="layout">
-
-      <!-- LEFT SIDE -->
+      <!-- LEFT: challenges + current challenge -->
       <section class="main-panel">
 
-        <!-- TEAM SETUP -->
         <div class="teams-setup">
           <h2>Hold</h2>
           <div class="team-form">
@@ -43,25 +37,29 @@
           </div>
         </div>
 
-        <!-- CHALLENGE PICKER -->
         <div class="challenge-picker">
           <h2>Udfordringer</h2>
+          <!-- main.js fills this -->
+          <div id="challengeGrid" class="challenge-grid"></div>
 
-          <!-- The deck renders into this grid automatically -->
-          <div class="challenge-grid">
-            <!-- JS fills -->
-          </div>
+          <p id="deckStatus" style="margin-top:8px; font-weight:700;"></p>
         </div>
 
-        <!-- CURRENT CHALLENGE -->
         <div class="current-challenge">
           <h2>Aktuel udfordring</h2>
           <p id="currentChallengeText">Ingen udfordring valgt endnu.</p>
 
-          <div class="challenge-controls">
+          <div class="challenge-controls" style="display:flex; gap:10px; align-items:center;">
             <button id="yesBtn" class="yes">✔ Ja</button>
             <button id="noBtn" class="no">✖ Nej</button>
             <button id="incompleteBtn" class="maybe">❔ Ikke fuldført</button>
+
+            <!-- countdown appears here when GP is locked -->
+            <div id="gpCountdownMain" style="
+              min-width:70px; text-align:center; font-size:1.6rem; font-weight:900;
+              padding:6px 10px; border-radius:10px; background:#111; color:#fff;
+              display:none;
+            ">20</div>
           </div>
 
           <p class="hint">
@@ -69,10 +67,6 @@
           </p>
         </div>
 
-        <!-- 👇 MINI GAME ADMIN AREA (JuleKortet etc.) -->
-        <div id="miniGameArea"></div>
-
-        <!-- END GAME -->
         <div class="game-end">
           <button id="endGameBtn" class="end-game">🏁 Afslut spil</button>
           <p id="endGameResult" class="end-result"></p>
@@ -80,32 +74,17 @@
 
       </section>
 
-      <!-- RIGHT SIDE: LEADERBOARD -->
+      <!-- RIGHT: leaderboard -->
       <aside class="sidebar">
         <h2>Leaderboard</h2>
         <p class="sidebar-hint">Klik på et hold for at vælge det. Brug + / - for point.</p>
-        <ul id="teamList" class="team-list">
-          <!-- JS fills -->
-        </ul>
+        <ul id="teamList" class="team-list"></ul>
       </aside>
-
     </main>
   </div>
 
-  <!-- Socket.IO client -->
   <script src="/socket.io/socket.io.js"></script>
-
-  <!-- Admin JS -->
+  <!-- IMPORTANT: module because main.js imports deck files -->
   <script type="module" src="main.js?v=35"></script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
