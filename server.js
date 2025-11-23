@@ -1,4 +1,5 @@
-// server.js (FULL) — v31 hardened for Grandprix + NisseGåden + JuleKortet
+// server.js v34 (stable gameCode + joinGame)
+// Keeps your existing minigame events intact.
 
 const express = require("express");
 const app = express();
@@ -6,207 +7,159 @@ const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 const multer = require("multer");
 const fs = require("fs");
-const path = require("path");
 
-// Create uploads folder if missing
-if (!fs.existsSync("./uploads")) {
-  fs.mkdirSync("./uploads");
-}
+// --------------------
+// Static + uploads
+// --------------------
+if (!fs.existsSync("./uploads")) fs.mkdirSync("./uploads");
 
 app.use(express.static("public"));
 app.use("/uploads", express.static("uploads"));
 
-// -----------------------------
-// Games by code
-// -----------------------------
-const games = {}; // { [code]: { teams, deck, currentChallenge, gameCode } }
-
-function getEmptyState(code) {
-  return {
-    teams: [],
-    deck: [],
-    currentChallenge: null,
-    gameCode: code || null,
-  };
-}
-
-// Multer for image uploads
 const upload = multer({ dest: "./uploads/" });
-
 app.post("/upload", upload.single("file"), (req, res) => {
   res.json({ filename: req.file.filename });
 });
 
-// -----------------------------
-// SOCKET.IO
-// -----------------------------
+// --------------------
+// Global state
+// --------------------
+let state = {
+  gameCode: null,
+  teams: [],
+  deck: [],
+  currentChallenge: null,
+};
+
+// helper
+const normalize = (s) => (s || "").trim().toLowerCase();
+const makeCode = () => String(Math.floor(1000 + Math.random() * 9000));
+
+// --------------------
+// Socket.io
+// --------------------
 io.on("connection", (socket) => {
-  console.log("New client connected:", socket.id);
+  console.log("New client:", socket.id);
 
-  // helper to get socket's game
-  function getGame() {
-    if (!socket.gameCode) return null;
-    return games[socket.gameCode] || null;
-  }
+  // Always send current state on connect
+  socket.emit("state", state);
 
-  // Send empty/default state on connect
-  socket.emit("state", getEmptyState(null));
+  // ADMIN syncs full state
+  socket.on("updateState", (incoming) => {
+    if (!incoming || typeof incoming !== "object") return;
 
-  // -----------------------------
-  // JOIN GAME (teams)
-  // -----------------------------
-  socket.on("joinGame", ({ code, teamName }, cb) => {
-    code = String(code || "").trim();
-    teamName = String(teamName || "").trim();
+    // ✅ Guard: never wipe gameCode unless admin sends a real one
+    if (incoming.gameCode !== undefined && incoming.gameCode !== null && incoming.gameCode !== "") {
+      state.gameCode = String(incoming.gameCode);
+    }
 
-    if (!code || !teamName) {
-      cb?.({ ok: false, message: "Manglende kode eller navn." });
+    // Accept teams if provided
+    if (Array.isArray(incoming.teams)) {
+      state.teams = incoming.teams;
+    }
+
+    // Accept deck if provided and not empty
+    if (Array.isArray(incoming.deck) && incoming.deck.length > 0) {
+      state.deck = incoming.deck;
+    }
+
+    // Accept currentChallenge (can be null)
+    if (incoming.currentChallenge !== undefined) {
+      state.currentChallenge = incoming.currentChallenge;
+    }
+
+    io.emit("state", state);
+  });
+
+  // Optional explicit start (admin can use or ignore)
+  socket.on("startGame", (ack) => {
+    state.gameCode = makeCode();
+    state.teams = [];
+    state.currentChallenge = null;
+    io.emit("state", state);
+    if (typeof ack === "function") ack({ ok: true, gameCode: state.gameCode });
+  });
+
+  // TEAMS join by code + name
+  socket.on("joinGame", ({ code, teamName }, ack) => {
+    const c = String(code || "").trim();
+    const n = String(teamName || "").trim();
+
+    if (!state.gameCode || c !== state.gameCode) {
+      if (typeof ack === "function") ack({ ok: false, message: "Forkert kode" });
       return;
     }
 
-    if (!games[code]) {
-      cb?.({ ok: false, message: "Forkert kode" });
+    if (!n) {
+      if (typeof ack === "function") ack({ ok: false, message: "Skriv et teamnavn" });
       return;
     }
 
-    const state = games[code];
-
-    // Unique name check
-    const exists = state.teams.some(
-      (t) => (t.name || "").toLowerCase() === teamName.toLowerCase()
-    );
-    if (exists) {
-      cb?.({ ok: false, message: "Holdnavn findes allerede." });
+    if (state.teams.some(t => normalize(t.name) === normalize(n))) {
+      if (typeof ack === "function") ack({ ok: false, message: "Navnet er allerede taget" });
       return;
     }
 
-    // Add team to state
-    const team = {
-      id: "t" + Date.now() + Math.random(),
-      name: teamName,
-      points: 0,
-    };
+    const team = { id: "t" + Date.now() + Math.random(), name: n, points: 0 };
     state.teams.push(team);
 
-    // Attach to socket
-    socket.gameCode = code;
-    socket.team = teamName;
+    socket.teamName = n;
 
-    // Join room for this game
-    socket.join(code);
-
-    console.log("Team joined:", teamName, "in game", code);
-
-    // Notify everyone in game
-    io.to(code).emit("state", state);
-
-    cb?.({ ok: true, team });
+    io.emit("state", state);
+    if (typeof ack === "function") ack({ ok: true, team });
   });
 
-  // -----------------------------
-  // ADMIN updates whole state
-  // -----------------------------
-  socket.on("updateState", (newState) => {
-    const code = String(newState?.gameCode || "").trim();
-    if (!code) return;
-
-    if (!games[code]) games[code] = getEmptyState(code);
-
-    games[code] = {
-      ...games[code],
-      ...newState,
-      gameCode: code,
-    };
-
-    socket.gameCode = code;
-    socket.join(code);
-
-    io.to(code).emit("state", games[code]);
-  });
-
-  // -----------------------------
-  // BUZZ (Grandprix)
-  // -----------------------------
+  // Grandprix buzz
   socket.on("buzz", () => {
-    const state = getGame();
-    if (!state) return;
-
-    io.to(socket.gameCode).emit("buzzed", socket.team);
+    const who = socket.teamName || socket.team || "Ukendt hold";
+    io.emit("buzzed", who);
   });
 
-  // -----------------------------
-  // TYPED ANSWER (Grandprix)
-  // -----------------------------
+  // Typed GP answer (team -> admin)
   socket.on("gp-typed-answer", (payload) => {
-    const state = getGame();
-    if (!state) return;
-
-    const teamName = payload?.teamName || socket.team;
-    const text = payload?.text;
-
-    if (!teamName || typeof text !== "string") return;
-
-    io.to(socket.gameCode).emit("gp-typed-answer", { teamName, text });
+    io.emit("gp-typed-answer", payload);
   });
 
-  // -----------------------------
-  // STOP GP AUDIO everywhere
-  // -----------------------------
-  socket.on("gp-stop-audio-now", () => {
-    const state = getGame();
-    if (!state) return;
-
-    io.to(socket.gameCode).emit("gp-stop-audio-now");
-  });
-
-  // -----------------------------
-  // SUBMIT CARD (NisseGåden / JuleKortet)
-  // Accepts string OR {teamName,text}
-  // -----------------------------
+  // Cards (NisseGåden + JuleKortet)
   socket.on("submitCard", (payload) => {
-    const state = getGame();
-    if (!state) return;
-
-    let teamName = socket.team;
-    let text = "";
+    let teamName, text;
 
     if (typeof payload === "string") {
+      teamName = socket.teamName;
       text = payload;
-    } else if (payload && typeof payload === "object") {
-      teamName = payload.teamName || payload.team || socket.team;
-      text = payload.text || "";
+    } else {
+      teamName = payload?.teamName || socket.teamName;
+      text = payload?.text;
     }
+    if (!teamName || !text) return;
 
-    text = String(text).trim();
-    if (!text) return;
-
-    io.to(socket.gameCode).emit("newCard", { teamName, text });
+    io.emit("newCard", { teamName, text });
   });
 
-  // -----------------------------
-  // SUBMIT PHOTO (unused now)
-  // -----------------------------
-  socket.on("submitPhoto", (file) => {
-    const state = getGame();
-    if (!state) return;
+  // Photos (KreaNissen)
+  socket.on("submitPhoto", (payload) => {
+    let teamName, filename;
+    if (typeof payload === "string") {
+      teamName = socket.teamName;
+      filename = payload;
+    } else {
+      teamName = payload?.teamName || socket.teamName;
+      filename = payload?.filename || payload?.file;
+    }
+    if (!teamName || !filename) return;
 
-    io.to(socket.gameCode).emit("newPhoto", {
-      teamName: socket.team,
-      file,
-    });
+    io.emit("newPhoto", { teamName, filename });
   });
 
-  // -----------------------------
-  // VOTE (FiNisse / JuleKortet)
-  // -----------------------------
+  // Votes (JK + KN)
   socket.on("vote", (index) => {
-    const state = getGame();
-    if (!state) return;
+    const voter = socket.teamName || "Ukendt hold";
+    io.emit("voteUpdate", { voter, index });
+  });
 
-    io.to(socket.gameCode).emit("voteUpdate", {
-      voter: socket.team,
-      index,
-    });
+  // Admin stop GP audio everywhere
+  socket.on("gp-stop-audio-now", () => {
+    io.emit("gp-stop-audio-now");
   });
 
   socket.on("disconnect", () => {
@@ -214,13 +167,8 @@ io.on("connection", (socket) => {
   });
 });
 
-// Basic root response
-app.get("/", (req, res) => {
-  res.send("Xmas Challenge Server Running");
-});
+// Root
+app.get("/", (req, res) => res.send("Xmas Challenge Server Running"));
 
 const PORT = process.env.PORT || 3000;
-
-http.listen(PORT, () => {
-  console.log("Server listening on port", PORT);
-});
+http.listen(PORT, () => console.log("Server listening on port", PORT));
