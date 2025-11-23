@@ -1,9 +1,10 @@
-
-// public/team.js v31
+// public/team.js v36
+// Stable base (your v31) + KreaNissen added safely.
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
+import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -323,6 +324,7 @@ function renderChallenge(ch) {
 
   stopNisseGaaden(api);
   stopJuleKortet(api);
+  stopKreaNissen(api);
 
   if (!ch) {
     stopGrandprix();
@@ -353,6 +355,11 @@ function renderChallenge(ch) {
 
   if (ch.type === "JuleKortet") {
     renderJuleKortet(ch, api, socket, myTeamName);
+    return;
+  }
+
+  if (ch.type === "KreaNissen") {
+    renderKreaNissen(ch, api, socket, myTeamName);
     return;
   }
 
@@ -402,4 +409,3 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
-
