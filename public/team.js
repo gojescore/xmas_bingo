@@ -1,5 +1,5 @@
-// public/team.js v36
-// Stable base (your v31) + KreaNissen added safely.
+// public/team.js v37
+// Stable base (Grandprix/NisseGåden/JuleKortet) + KreaNissen safely added.
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -184,7 +184,6 @@ function ensureNisseGaadenAnswer() {
     const text = (ngInput.value || "").trim();
     if (!text) return;
 
-    // send teamName explicitly
     socket.emit("submitCard", { teamName: myTeamName, text });
 
     ngInput.value = "";
@@ -322,12 +321,13 @@ function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
+  // Stop all minigames before switching
+  stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
 
   if (!ch) {
-    stopGrandprix();
     challengeTitle.textContent = "Ingen udfordring endnu";
     challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
@@ -344,8 +344,6 @@ function renderChallenge(ch) {
     renderGrandprix(ch, api);
     return;
   }
-
-  stopGrandprix();
 
   if (ch.type === "NisseGåden") {
     renderNisseGaaden(ch, api);
