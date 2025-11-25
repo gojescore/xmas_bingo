@@ -483,9 +483,10 @@ body.nissegaaden-mode #challengeText {
 
 /* ----- Background + surface colors ----- */
 body {
-  background: radial-gradient(circle at top, #8b0000, #3b0000); /* deep christmas red */
-  color: #f5f5f5; /* default text light */
+  background: linear-gradient(to bottom, #0a1d37, #153b6b, #1e4c88); /* Winter Night */
+  color: #f5f5f5;
 }
+
 
 /* Your main white "surface" */
 .app, .main-panel, .sidebar, .current-challenge {
@@ -519,5 +520,6 @@ body {
 #kreanissenPopup {
   z-index: 9997; /* you already use high values, this keeps it safe */
 }
+
 
 
