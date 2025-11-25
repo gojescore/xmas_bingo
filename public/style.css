@@ -481,4 +481,43 @@ body.nissegaaden-mode #challengeText {
 
 }
 
+/* ----- Background + surface colors ----- */
+body {
+  background: radial-gradient(circle at top, #8b0000, #3b0000); /* deep christmas red */
+  color: #f5f5f5; /* default text light */
+}
+
+/* Your main white "surface" */
+.app, .main-panel, .sidebar, .current-challenge {
+  background: rgba(0,0,0,0.85);  /* black surface */
+  color: #f5f5f5;
+  border-radius: 14px;
+}
+
+/* If you have specific containers that were white, add them here too */
+
+
+/* ----- Snow layer ----- */
+#snowLayer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;              /* behind everything */
+  pointer-events: none;    /* NEVER blocks clicks */
+}
+
+/* Make sure your normal UI is above snow */
+.app {
+  position: relative;
+  z-index: 2;
+}
+
+/* Make sure popups are above snow + app */
+#grandprixPopup,
+#julekortPopup,
+#kreanissenPopup {
+  z-index: 9997; /* you already use high values, this keeps it safe */
+}
+
 
