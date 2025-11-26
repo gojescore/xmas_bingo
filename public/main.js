@@ -1,7 +1,6 @@
-// public/main.js v34+facit+tasktext
-// Aligned with team.js v31+ and grandprix/julekortet/nissegaaden working versions.
-// Adds KreaNissen deck + admin flow WITHOUT touching existing minigame logic.
-// Also shows NisseGåden "facit" AND task description (text) for all challenges.
+// public/main.js v35 (with facit display)
+// Aligned with team.js v37 and grandprix/julekortet/nissegaaden/kreanissen.
+// Adds red facit/opgave text in admin panel without changing game logic.
 
 // =====================================================
 // SOCKET
@@ -198,7 +197,6 @@ function renderDeck() {
         startAdminCreatingTimer();
       }
       else if (card.type === "NisseGåden") {
-        // answer (if present on card) is kept as is
         currentChallenge = { ...card, answers: [] };
       }
       else {
@@ -298,26 +296,27 @@ function renderMiniGameArea() {
 
   // ---------- GRANDPRIX ----------
   if (currentChallenge.type === "Nisse Grandprix") {
+    const ch = currentChallenge;
+
     const wrap = document.createElement("div");
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `
       <h3>Nisse Grandprix</h3>
-      <p><strong>Fase:</strong> ${currentChallenge.phase}</p>
-      <p><strong>Buzzed først:</strong> ${currentChallenge.firstBuzz?.teamName || "—"}</p>
-      <p><strong>Svar fra:</strong> ${currentChallenge.typedAnswer?.teamName || "—"}</p>
-      <p><strong>Tekst:</strong> ${currentChallenge.typedAnswer?.text || "—"}</p>
+      <p><strong>Fase:</strong> ${ch.phase}</p>
+      <p><strong>Buzzed først:</strong> ${ch.firstBuzz?.teamName || "—"}</p>
+      <p><strong>Svar fra:</strong> ${ch.typedAnswer?.teamName || "—"}</p>
+      <p><strong>Tekst:</strong> ${ch.typedAnswer?.text || "—"}</p>
       <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
     `;
 
-    // 👉 Teacher-only task description (if the card has text)
-    if (currentChallenge.text) {
-      const desc = document.createElement("p");
-      desc.style.cssText =
-        "margin-top:8px; font-weight:700; color:#333;";
-      desc.textContent = `Opgave-tekst: ${currentChallenge.text}`;
-      wrap.appendChild(desc);
+    // 🔴 Facit / opgave-tekst for Grandprix if provided in deck
+    if (ch.text) {
+      const facitP = document.createElement("p");
+      facitP.innerHTML =
+        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+      wrap.appendChild(facitP);
     }
 
     miniGameArea.appendChild(wrap);
@@ -327,12 +326,23 @@ function renderMiniGameArea() {
 
   // ---------- NISSEGÅDEN ----------
   if (currentChallenge.type === "NisseGåden") {
+    const ch = currentChallenge;
+
     const wrap = document.createElement("div");
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
-    const answers = currentChallenge.answers || [];
+
+    // 🔴 Show the riddle text / teacher opgave text if available
+    if (ch.text) {
+      const facitP = document.createElement("p");
+      facitP.innerHTML =
+        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+      wrap.appendChild(facitP);
+    }
+
+    const answers = ch.answers || [];
 
     if (!answers.length) {
       const p = document.createElement("p");
@@ -351,24 +361,6 @@ function renderMiniGameArea() {
       });
     }
 
-    // 👉 Task description (riddle text), teacher view
-    if (currentChallenge.text) {
-      const desc = document.createElement("p");
-      desc.style.cssText =
-        "margin-top:8px; font-weight:700; color:#333;";
-      desc.textContent = `Opgave-tekst: ${currentChallenge.text}`;
-      wrap.appendChild(desc);
-    }
-
-    // ✅ Teacher-only solution text (if deck card has `answer`)
-    if (currentChallenge.answer) {
-      const sol = document.createElement("p");
-      sol.style.cssText =
-        "margin-top:4px; font-weight:800; color:#b11111;";
-      sol.textContent = `Facit (kun til dig): ${currentChallenge.answer}`;
-      wrap.appendChild(sol);
-    }
-
     miniGameArea.appendChild(wrap);
     return;
   }
@@ -383,13 +375,12 @@ function renderMiniGameArea() {
 
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
 
-    // 👉 Task description from deck (text)
+    // 🔴 Show the teacher's task text (card.text) in red
     if (ch.text) {
-      const desc = document.createElement("p");
-      desc.style.cssText =
-        "margin:4px 0 10px; font-weight:700; color:#333;";
-      desc.textContent = `Opgave-tekst: ${ch.text}`;
-      wrap.appendChild(desc);
+      const facitP = document.createElement("p");
+      facitP.innerHTML =
+        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+      wrap.appendChild(facitP);
     }
 
     if (ch.phase === "writing") {
@@ -459,13 +450,12 @@ function renderMiniGameArea() {
 
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
-    // 👉 Task description (what to build / create)
+    // 🔴 Show KreaNissen prompt text (card.text) in red
     if (ch.text) {
-      const desc = document.createElement("p");
-      desc.style.cssText =
-        "margin:4px 0 10px; font-weight:700; color:#064420;";
-      desc.textContent = `Opgave-tekst: ${ch.text}`;
-      wrap.appendChild(desc);
+      const facitP = document.createElement("p");
+      facitP.innerHTML =
+        `<strong>Opgave-tekst:</strong> <span class="facit-text">${ch.text}</span>`;
+      wrap.appendChild(facitP);
     }
 
     if (ch.phase === "creating") {
@@ -492,13 +482,13 @@ function renderMiniGameArea() {
       const photos = ch.votingPhotos || [];
       const votes = tallyVotes(ch.votes || {}, photos.length);
 
-      photos.forEach((p, i) => {
+      photos.forEach((pObj, i) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
-          <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
+          <img src="/uploads/${pObj.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
           <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
         `;
         wrap.appendChild(box);
@@ -997,4 +987,3 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
