@@ -85,9 +85,10 @@ h2 {
 .app-header h1 {
   margin: 0;
   font-size: 2.1rem;
-  color: #b22222;
-  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.2);
+  color: #ffffff; /* brighter for contrast */
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6); /* stronger shadow for readability */
 }
+
 
 /* ---------------------------------------------------------
    NISSEGÅDEN BIG TEXT MODE
@@ -403,5 +404,6 @@ body.nissegaaden-mode #challengeText {
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   filter: brightness(0.97);
 }
+
 
 
