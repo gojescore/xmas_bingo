@@ -319,3 +319,37 @@ body.nissegaaden-mode #challengeText {
 #kreanissenPopup {
   z-index: 9997;
 }
+
+/* =============================
+   FANCY CHRISTMAS HEADER BANNER
+   ============================= */
+
+.app-header {
+  background: linear-gradient(135deg, #b11111, #e53935, #ffb74d);
+  padding: 10px 16px;
+  border-radius: 14px;
+  position: relative;
+  overflow: hidden;
+  color: #fff;
+}
+
+/* Little glowing dots like Christmas lights */
+.app-header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(255,255,255,0.65) 0, transparent 50%),
+    radial-gradient(circle at 80% 30%, rgba(255,255,255,0.4) 0, transparent 55%),
+    radial-gradient(circle at 40% 80%, rgba(255,255,255,0.55) 0, transparent 55%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.app-header .header-main,
+.app-header .game-code-box {
+  position: relative; /* keep content above the glow layer */
+  z-index: 1;
+}
+
+
