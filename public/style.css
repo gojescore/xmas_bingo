@@ -425,7 +425,17 @@ body.nissegaaden-mode #challengeText {
   font-weight: 700;
 }
 
+/* FACIT text styling */
+#facitLine {
+  font-size: 1.3rem;       /* larger */
+  font-weight: 700;        /* bold */
+  color: #b11111;          /* Christmas red */
+  text-align: center;      /* centered */
+  margin-top: 10px;
+  display: block;
+}
 
-
-
-
+/* Center the Yes / No / Incomplete buttons */
+.challenge-controls {
+  justify-content: center !important;
+}
