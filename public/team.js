@@ -162,6 +162,8 @@ function renderLeaderboard(teams) {
 // NISSEGÅDEN answer input
 // ===========================
 let ngWrap = null, ngInput = null, ngBtn = null;
+let ngHasSubmitted = false;   // 👈 new flag
+
 
 function ensureNisseGaadenAnswer() {
   if (ngWrap) return;
@@ -407,3 +409,4 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
+
