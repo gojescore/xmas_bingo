@@ -364,4 +364,44 @@ body.nissegaaden-mode #challengeText {
   border-image: linear-gradient(45deg, #b11111, #2e7d32, #f9a825, #b11111) 1;
 }
 
+/* =============================
+   SOFT JINGLE BUTTON ANIMATIONS
+   ============================= */
+
+.team-form button,
+.challenge-card,
+.challenge-controls button,
+.end-game,
+.reset-btn,
+.start-game-btn {
+  transition:
+    transform 0.12s ease-out,
+    box-shadow 0.12s ease-out,
+    filter 0.12s ease-out;
+}
+
+/* Hover: gentle lift + brightness */
+.team-form button:hover,
+.challenge-card:hover,
+.challenge-controls button:hover,
+.end-game:hover,
+.reset-btn:hover,
+.start-game-btn:hover {
+  transform: translateY(-1px) scale(1.03);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+  filter: brightness(1.05);
+}
+
+/* Active: tiny “jingle” tap */
+.team-form button:active,
+.challenge-card:active,
+.challenge-controls button:active,
+.end-game:active,
+.reset-btn:active,
+.start-game-btn:active {
+  transform: translateY(1px) scale(0.97);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  filter: brightness(0.97);
+}
+
 
