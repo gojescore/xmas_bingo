@@ -1,6 +1,7 @@
-// public/main.js v34+facit
-// Aligned with team.js v31+ and grandprix/julekortet/nissegaaden working versions.
-// Adds KreaNissen deck + admin flow + small facit text on admin for all 4 types.
+// public/main.js v35
+// Aligned with team.js v37 and grandprix/julekortet/nissegaaden/kreanissen working versions.
+// Adds KreaNissen deck + admin flow WITHOUT touching existing minigame logic.
+// Adds optional facit line + reload deck button support.
 
 // =====================================================
 // SOCKET
@@ -28,6 +29,9 @@ const endGameResultEl = document.getElementById("endGameResult");
 const challengeGridEl = document.querySelector(".challenge-grid");
 const miniGameArea = document.getElementById("miniGameArea");
 
+// 🔄 Optional "Genindlæs udfordringer" button (if you add it to HTML)
+const reloadDeckBtn = document.getElementById("reloadDeckBtn");
+
 // =====================================================
 // STATE
 // =====================================================
@@ -39,6 +43,9 @@ let currentChallenge = null;
 let gameCode = null;
 
 const STORAGE_KEY = "xmasChallenge_admin_v34";
+
+// internal facit line element
+let facitEl = null;
 
 // =====================================================
 // Persistence
@@ -88,6 +95,23 @@ function shuffle(arr) {
   return a;
 }
 
+// small helper for facit line under current challenge text
+function ensureFacitEl() {
+  if (facitEl) return facitEl;
+  if (!currentChallengeText) return null;
+
+  facitEl = document.createElement("p");
+  facitEl.id = "currentChallengeFacit";
+  facitEl.style.margin = "4px 0 0";
+  facitEl.style.fontSize = "0.9rem";
+  facitEl.style.fontWeight = "700";
+  facitEl.style.color = "crimson";
+  facitEl.style.textAlign = "center";
+
+  currentChallengeText.insertAdjacentElement("afterend", facitEl);
+  return facitEl;
+}
+
 // =====================================================
 // Deck load
 // =====================================================
@@ -118,7 +142,7 @@ async function loadDeckSafely() {
     kn = m.DECK || m.kreaNissenDeck || m.deck || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk, ...kn].map(c => ({ ...c, used: !!c.used }));
+  deck = [...gp, ...ng, ...jk, ...kn].map((c) => ({ ...c, used: !!c.used }));
 
   renderDeck();
   renderTeams();
@@ -127,6 +151,14 @@ async function loadDeckSafely() {
   saveLocal();
   syncToServer();
 }
+
+// simple wrapper used by the reload button
+async function reloadDeck() {
+  await loadDeckSafely();
+}
+
+// hook up reload button if it exists
+reloadDeckBtn?.addEventListener("click", reloadDeck);
 
 // =====================================================
 // Render deck
@@ -144,7 +176,7 @@ function renderDeck() {
     return;
   }
 
-  deck.forEach(card => {
+  deck.forEach((card) => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
     btn.textContent = card.title || card.type;
@@ -169,37 +201,33 @@ function renderDeck() {
           typedAnswer: null,
           answeredTeams: {}
         };
-      }
-      else if (card.type === "JuleKortet") {
+      } else if (card.type === "JuleKortet") {
         currentChallenge = {
           ...card,
           phase: "writing",
           writingSeconds: 120,
           writingStartAt: Date.now(),
-          cards: [],        // [{ teamName, text }]
+          cards: [], // [{ teamName, text }]
           votingCards: [],
-          votes: {},        // { voterTeamName: index }
+          votes: {}, // { voterTeamName: index }
           winners: []
         };
         startAdminWritingTimer();
-      }
-      else if (card.type === "KreaNissen") {
+      } else if (card.type === "KreaNissen") {
         currentChallenge = {
           ...card,
           phase: "creating",
           creatingSeconds: 180,
           creatingStartAt: Date.now(),
-          photos: [],        // [{ teamName, filename }]
-          votingPhotos: [],  // [{ filename, ownerTeamName }]
-          votes: {},         // { voterTeamName: index }
+          photos: [], // [{ teamName, filename }]
+          votingPhotos: [], // [{ filename, ownerTeamName }]
+          votes: {}, // { voterTeamName: index }
           winners: []
         };
         startAdminCreatingTimer();
-      }
-      else if (card.type === "NisseGåden") {
+      } else if (card.type === "NisseGåden") {
         currentChallenge = { ...card, answers: [] };
-      }
-      else {
+      } else {
         currentChallenge = { ...card };
       }
 
@@ -222,7 +250,7 @@ function renderDeck() {
 // Leaderboard
 // =====================================================
 function renderTeams() {
-  const sorted = [...teams].sort((a,b) => {
+  const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0))
       return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
@@ -230,7 +258,7 @@ function renderTeams() {
 
   teamListEl.innerHTML = "";
 
-  sorted.forEach(team => {
+  sorted.forEach((team) => {
     const li = document.createElement("li");
     li.className =
       "team-item" + (team.id === selectedTeamId ? " selected" : "");
@@ -247,10 +275,14 @@ function renderTeams() {
     minus.onclick = (e) => {
       e.stopPropagation();
       team.points = Math.max(0, (team.points ?? 0) - 1);
-      saveLocal(); renderTeams(); syncToServer();
+      saveLocal();
+      renderTeams();
+      syncToServer();
     };
 
     const val = document.createElement("span");
+    // add a bit of horizontal padding so it doesn't look squished
+    val.style.padding = "0 8px";
     val.textContent = team.points ?? 0;
 
     const plus = document.createElement("button");
@@ -258,7 +290,9 @@ function renderTeams() {
     plus.onclick = (e) => {
       e.stopPropagation();
       team.points = (team.points ?? 0) + 1;
-      saveLocal(); renderTeams(); syncToServer();
+      saveLocal();
+      renderTeams();
+      syncToServer();
     };
 
     pointsDiv.append(minus, val, plus);
@@ -274,12 +308,41 @@ function renderTeams() {
 }
 
 // =====================================================
-// Current challenge text
+// Current challenge text + facit
 // =====================================================
 function renderCurrentChallenge() {
-  currentChallengeText.textContent = currentChallenge
-    ? `Aktuel udfordring: ${currentChallenge.title || currentChallenge.type}`
-    : "Ingen udfordring valgt endnu.";
+  if (!currentChallengeText) return;
+
+  if (!currentChallenge) {
+    currentChallengeText.textContent = "Ingen udfordring valgt endnu.";
+    const f = ensureFacitEl();
+    if (f) {
+      f.textContent = "";
+      f.style.display = "none";
+    }
+    return;
+  }
+
+  const title = currentChallenge.title || currentChallenge.type;
+  currentChallengeText.textContent = `Aktuel udfordring: ${title}`;
+
+  // try to show any teacher-facing solution/note
+  const f = ensureFacitEl();
+  if (f) {
+    const facit =
+      currentChallenge.answer ||
+      currentChallenge.facit ||
+      currentChallenge.solution ||
+      "";
+
+    if (facit) {
+      f.textContent = `Facit: ${facit}`;
+      f.style.display = "block";
+    } else {
+      f.textContent = "";
+      f.style.display = "none";
+    }
+  }
 }
 
 // =====================================================
@@ -296,29 +359,18 @@ function renderMiniGameArea() {
 
   // ---------- GRANDPRIX ----------
   if (currentChallenge.type === "Nisse Grandprix") {
-    const ch = currentChallenge;
-
     const wrap = document.createElement("div");
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `
       <h3>Nisse Grandprix</h3>
-      <p><strong>Fase:</strong> ${ch.phase}</p>
-      <p><strong>Buzzed først:</strong> ${ch.firstBuzz?.teamName || "—"}</p>
-      <p><strong>Svar fra:</strong> ${ch.typedAnswer?.teamName || "—"}</p>
-      <p><strong>Tekst:</strong> ${ch.typedAnswer?.text || "—"}</p>
+      <p><strong>Fase:</strong> ${currentChallenge.phase}</p>
+      <p><strong>Buzzed først:</strong> ${currentChallenge.firstBuzz?.teamName || "—"}</p>
+      <p><strong>Svar fra:</strong> ${currentChallenge.typedAnswer?.teamName || "—"}</p>
+      <p><strong>Tekst:</strong> ${currentChallenge.typedAnswer?.text || "—"}</p>
       <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
     `;
-
-    // 🔴 Optional facit on admin (small red line)
-    if (ch.answer) {
-      const facitP = document.createElement("p");
-      facitP.innerHTML =
-        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
-      wrap.appendChild(facitP);
-    }
-
     miniGameArea.appendChild(wrap);
     startAdminGpCountdownIfLocked();
     return;
@@ -326,30 +378,19 @@ function renderMiniGameArea() {
 
   // ---------- NISSEGÅDEN ----------
   if (currentChallenge.type === "NisseGåden") {
-    const ch = currentChallenge;
-
     const wrap = document.createElement("div");
     wrap.style.cssText =
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
-
-    // 🔴 Optional facit line (solution text)
-    if (ch.answer) {
-      const facitP = document.createElement("p");
-      facitP.innerHTML =
-        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
-      wrap.appendChild(facitP);
-    }
-
-    const answers = ch.answers || [];
+    const answers = currentChallenge.answers || [];
 
     if (!answers.length) {
       const p = document.createElement("p");
       p.textContent = "Ingen svar endnu…";
       wrap.appendChild(p);
     } else {
-      answers.forEach(a => {
+      answers.forEach((a) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:8px; border:1px solid #ddd; border-radius:8px; margin-bottom:6px; background:#fff;";
@@ -374,14 +415,6 @@ function renderMiniGameArea() {
       "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
-
-    // 🔴 Optional facit line / teacher note (same style as Grandprix/NisseGåden)
-    if (ch.answer) {
-      const facitP = document.createElement("p");
-      facitP.innerHTML =
-        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
-      wrap.appendChild(facitP);
-    }
 
     if (ch.phase === "writing") {
       const p = document.createElement("p");
@@ -450,14 +483,6 @@ function renderMiniGameArea() {
 
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
-    // 🔴 Optional facit / teacher note line
-    if (ch.answer) {
-      const facitP = document.createElement("p");
-      facitP.innerHTML =
-        `<strong>Facit:</strong> <span class="facit-text">${ch.answer}</span>`;
-      wrap.appendChild(facitP);
-    }
-
     if (ch.phase === "creating") {
       const p = document.createElement("p");
       p.id = "knAdminCountdown";
@@ -482,13 +507,13 @@ function renderMiniGameArea() {
       const photos = ch.votingPhotos || [];
       const votes = tallyVotes(ch.votes || {}, photos.length);
 
-      photos.forEach((p, i) => {
+      photos.forEach((pPhoto, i) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
-          <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
+          <img src="/uploads/${pPhoto.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
           <div style="font-weight:900;">Stemmer: ${votes[i] || 0}</div>
         `;
         wrap.appendChild(box);
@@ -553,7 +578,7 @@ function startVotingPhase() {
   if (currentChallenge.phase !== "writing") return;
 
   const votingCards = shuffle(
-    currentChallenge.cards.map(c => ({
+    currentChallenge.cards.map((c) => ({
       text: c.text,
       ownerTeamName: c.teamName || c.team
     }))
@@ -571,7 +596,7 @@ function startVotingPhase() {
 
 function tallyVotes(votesObj, cardsLen) {
   const counts = Array(cardsLen).fill(0);
-  Object.values(votesObj).forEach(idx => {
+  Object.values(votesObj).forEach((idx) => {
     if (typeof idx === "number" && idx >= 0 && idx < cardsLen) counts[idx]++;
   });
   return counts;
@@ -587,15 +612,15 @@ function finishVotingAndAward() {
 
   const winningIndexes = counts
     .map((c, i) => ({ i, c }))
-    .filter(x => x.c === max)
-    .map(x => x.i);
+    .filter((x) => x.c === max)
+    .map((x) => x.i);
 
   const winners = winningIndexes
-    .map(i => cards[i].ownerTeamName)
+    .map((i) => cards[i].ownerTeamName)
     .filter(Boolean);
 
-  winners.forEach(name => {
-    const t = teams.find(x => x.name === name);
+  winners.forEach((name) => {
+    const t = teams.find((x) => x.name === name);
     if (t) t.points = (t.points ?? 0) + 1;
   });
 
@@ -645,7 +670,7 @@ function startKreaVotingPhase() {
   if (currentChallenge.phase !== "creating") return;
 
   const votingPhotos = shuffle(
-    currentChallenge.photos.map(p => ({
+    currentChallenge.photos.map((p) => ({
       filename: p.filename,
       ownerTeamName: p.teamName || p.team
     }))
@@ -671,15 +696,15 @@ function finishKreaVotingAndAward() {
 
   const winningIndexes = counts
     .map((c, i) => ({ i, c }))
-    .filter(x => x.c === max)
-    .map(x => x.i);
+    .filter((x) => x.c === max)
+    .map((x) => x.i);
 
   const winners = winningIndexes
-    .map(i => photos[i].ownerTeamName)
+    .map((i) => photos[i].ownerTeamName)
     .filter(Boolean);
 
-  winners.forEach(name => {
-    const t = teams.find(x => x.name === name);
+  winners.forEach((name) => {
+    const t = teams.find((x) => x.name === name);
     if (t) t.points = (t.points ?? 0) + 1;
   });
 
@@ -702,8 +727,13 @@ function startAdminGpCountdownIfLocked() {
   if (!currentChallenge.countdownStartAt) return;
 
   gpAdminTimer = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - currentChallenge.countdownStartAt) / 1000);
-    const left = Math.max(0, (currentChallenge.countdownSeconds || 20) - elapsed);
+    const elapsed = Math.floor(
+      (Date.now() - currentChallenge.countdownStartAt) / 1000
+    );
+    const left = Math.max(
+      0,
+      (currentChallenge.countdownSeconds || 20) - elapsed
+    );
     const elc = document.getElementById("gpAdminCountdown");
     if (elc) elc.textContent = left;
     if (left <= 0) clearInterval(gpAdminTimer);
@@ -729,7 +759,7 @@ yesBtn.onclick = () => {
 
   stopGpAudioEverywhere();
 
-  const t = teams.find(x => x.id === selectedTeamId);
+  const t = teams.find((x) => x.id === selectedTeamId);
   if (t) t.points = (t.points ?? 0) + 1;
 
   currentChallenge = null;
@@ -751,8 +781,7 @@ noBtn.onclick = () => {
     if (currentChallenge.phase === "locked" && currentChallenge.firstBuzz) {
       const buzzingTeam = currentChallenge.firstBuzz.teamName;
 
-      currentChallenge.answeredTeams =
-        currentChallenge.answeredTeams || {};
+      currentChallenge.answeredTeams = currentChallenge.answeredTeams || {};
       currentChallenge.answeredTeams[buzzingTeam] = true;
 
       currentChallenge.phase = "listening";
@@ -804,7 +833,7 @@ resetBtn.onclick = () => {
   teams = [];
   selectedTeamId = null;
   currentChallenge = null;
-  deck.forEach(c => (c.used = false));
+  deck.forEach((c) => (c.used = false));
   endGameResultEl.textContent = "";
 
   renderTeams();
@@ -821,32 +850,18 @@ endGameBtn.onclick = () => {
 
   stopGpAudioEverywhere();
 
-  const sorted = [...teams].sort((a,b)=>(b.points??0)-(a.points??0));
+  const sorted = [...teams].sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
   const topScore = sorted[0].points;
-  const winners = sorted.filter(t => t.points === topScore);
+  const winners = sorted.filter((t) => t.points === topScore);
 
   endGameResultEl.textContent =
     winners.length === 1
       ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
-      : `Uafgjort: ${winners.map(x => x.name).join(", ")} – ${topScore} point.`;
+      : `Uafgjort: ${winners.map((x) => x.name).join(", ")} – ${topScore} point.`;
 
   saveLocal();
   syncToServer();
 };
-
-function reloadDeck() {
-  // Reload from your deck folders
-  deck = loadDeckSafely();
-  
-  // Send to server so teams get the updated deck
-  syncToServer();
-
-  // Update your UI
-  renderDeck();
-
-  alert("Udfordringer genindlæst!");
-}
-
 
 // =====================================================
 // Start game
@@ -870,7 +885,7 @@ addTeamBtn.onclick = () => {
   const name = teamNameInput.value.trim();
   if (!name) return;
 
-  if (teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+  if (teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
     alert("Navnet findes allerede.");
     return;
   }
@@ -898,7 +913,7 @@ socket.on("buzzed", (teamName) => {
   currentChallenge.countdownStartAt = Date.now();
   currentChallenge.typedAnswer = null;
 
-  const t = teams.find(x => x.name === teamName);
+  const t = teams.find((x) => x.name === teamName);
   if (t) selectedTeamId = t.id;
 
   renderTeams();
@@ -930,8 +945,13 @@ socket.on("newCard", ({ teamName, text }) => {
     currentChallenge.answers.push({ teamName, text });
   }
 
-  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
-    const already = currentChallenge.cards.some(c => (c.teamName || c.team) === teamName);
+  if (
+    currentChallenge.type === "JuleKortet" &&
+    currentChallenge.phase === "writing"
+  ) {
+    const already = currentChallenge.cards.some(
+      (c) => (c.teamName || c.team) === teamName
+    );
     if (!already) currentChallenge.cards.push({ teamName, text });
   }
 
@@ -945,7 +965,9 @@ socket.on("newPhoto", ({ teamName, filename }) => {
   if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
   if (currentChallenge.phase !== "creating") return;
 
-  const already = currentChallenge.photos.some(p => (p.teamName || p.team) === teamName);
+  const already = currentChallenge.photos.some(
+    (p) => (p.teamName || p.team) === teamName
+  );
   if (!already) currentChallenge.photos.push({ teamName, filename });
 
   renderMiniGameArea();
@@ -953,7 +975,7 @@ socket.on("newPhoto", ({ teamName, filename }) => {
   syncToServer();
 });
 
-// ---- Votes update (used by both JuleKortet + KreaNissen)
+// ---- Votes update (JuleKortet + KreaNissen)
 socket.on("voteUpdate", ({ voter, index }) => {
   if (!currentChallenge) return;
 
@@ -1001,4 +1023,3 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
