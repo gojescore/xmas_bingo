@@ -1,4 +1,5 @@
-// public/minigames/julekortet.js v4
+// public/minigames/julekortet.js v5
+// Same behaviour as v4, but now shows ch.text from the deck as the prompt.
 
 let writingTimer = null;
 let popupEl = null;
@@ -25,7 +26,8 @@ function ensurePopup() {
       box-shadow:0 8px 30px rgba(0,0,0,0.3);
     ">
       <h2 style="margin:0 0 6px; font-size:2rem;">🎄 JuleKortet</h2>
-      <p style="margin:0 0 10px; font-weight:700;">Skriv et kort på 2 minutter</p>
+      <!-- 👇 this line now gets its text from ch.text -->
+      <p id="jkPrompt" style="margin:0 0 10px; font-weight:700;"></p>
 
       <div style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
         Tid tilbage: <span id="jkTimeLeft">120</span>s
@@ -69,11 +71,17 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
   const popup = ensurePopup();
   popup.style.display = "flex";
 
+  const promptEl = popup.querySelector("#jkPrompt");
   const timeLeftEl = popup.querySelector("#jkTimeLeft");
   const textarea = popup.querySelector("#jkTextarea");
   const sendBtn = popup.querySelector("#jkSendBtn");
   const statusEl = popup.querySelector("#jkStatus");
   const voteWrap = popup.querySelector("#jkVoteWrap");
+
+  // 👇 show the deck's text as the prompt (fallback to old default)
+  if (promptEl) {
+    promptEl.textContent = ch.text || "Skriv et kort på 2 minutter";
+  }
 
   voteWrap.innerHTML = "";
 
