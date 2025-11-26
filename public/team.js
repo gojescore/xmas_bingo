@@ -1,6 +1,7 @@
-// public/team.js v37
-// Stable base (Grandprix/NisseGåden/JuleKortet) + KreaNissen safely added.
+// public/team.js v38
+// Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen)
 
+// Mini-games
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
@@ -9,7 +10,7 @@ import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2"
 const socket = io();
 const el = (id) => document.getElementById(id);
 
-// DOM
+// ---------- DOM ----------
 const codeInput = el("codeInput");
 const codeBtn = el("codeBtn");
 const nameRow = el("nameRow");
@@ -40,9 +41,12 @@ let myTeamName = null;
 let lastBuzzRoundId = null;
 let lastBuzzAt = 0;
 
-// per-round typed answer lock
+// Grandprix typed answer lock
 let gpAnsweredRoundId = null;
 let gpSentThisRound = false;
+
+// NisseGåden: remember if we already answered this riddle round
+let ngAnsweredRoundId = null;
 
 // ---------- Mini-game API ----------
 const api = {
@@ -61,7 +65,7 @@ const api = {
 };
 
 // ===========================
-// JOIN step 1
+// JOIN step 1 (enter code)
 // ===========================
 codeBtn?.addEventListener("click", tryCode);
 codeInput?.addEventListener("keydown", (e) => {
@@ -82,7 +86,7 @@ function tryCode() {
 }
 
 // ===========================
-// JOIN step 2
+// JOIN step 2 (enter team name)
 // ===========================
 nameBtn?.addEventListener("click", tryJoin);
 nameInput?.addEventListener("keydown", (e) => {
@@ -119,10 +123,11 @@ buzzBtn?.addEventListener("click", async () => {
   if (!joined) return;
 
   if (window.__grandprixAudio && window.__grandprixAudio.paused) {
-    try { await window.__grandprixAudio.play(); } catch {}
+    try {
+      await window.__grandprixAudio.play();
+    } catch {}
   }
 
-  // local fallback marker for "I buzzed"
   lastBuzzAt = Date.now();
   lastBuzzRoundId = window.__currentRoundId || null;
 
@@ -141,8 +146,9 @@ function renderLeaderboard(teams) {
   if (!teamListEl) return;
 
   const sorted = [...teams].sort((a, b) => {
-    if ((b.points ?? 0) !== (a.points ?? 0))
+    if ((b.points ?? 0) !== (a.points ?? 0)) {
       return (b.points ?? 0) - (a.points ?? 0);
+    }
     return (a.name || "").localeCompare(b.name || "");
   });
 
@@ -161,9 +167,9 @@ function renderLeaderboard(teams) {
 // ===========================
 // NISSEGÅDEN answer input
 // ===========================
-let ngWrap = null, ngInput = null, ngBtn = null;
-let ngHasSubmitted = false;   // 👈 new flag
-
+let ngWrap = null;
+let ngInput = null;
+let ngBtn = null;
 
 function ensureNisseGaadenAnswer() {
   if (ngWrap) return;
@@ -188,8 +194,13 @@ function ensureNisseGaadenAnswer() {
 
     socket.emit("submitCard", { teamName: myTeamName, text });
 
+    // mark this runde as answered
+    ngAnsweredRoundId = window.__currentRoundId || null;
+
+    // clear + lock UI
     ngInput.value = "";
     api.showStatus("✅ Svar sendt til læreren.");
+    hideNisseGaadenAnswer(); // "tilbage til startskærm" (ingen input mere)
   };
 
   ngWrap.append(ngInput, ngBtn);
@@ -273,7 +284,7 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
-  // new round => reset local one-answer lock
+  // new round => reset lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -336,7 +347,7 @@ function renderChallenge(ch) {
     return;
   }
 
-  // store round id for local buzz fallback
+  // store round id globally (also used by NisseGåden & GP fallback)
   window.__currentRoundId = ch.id || null;
 
   challengeTitle.textContent = ch.type || "Udfordring";
@@ -349,7 +360,15 @@ function renderChallenge(ch) {
 
   if (ch.type === "NisseGåden") {
     renderNisseGaaden(ch, api);
-    showNisseGaadenAnswer();
+
+    const alreadyAnswered =
+      ch.id && ngAnsweredRoundId && ch.id === ngAnsweredRoundId;
+
+    if (!alreadyAnswered) {
+      showNisseGaadenAnswer();
+    } else {
+      api.showStatus("✅ Svar sendt. Vent på læreren…");
+    }
     return;
   }
 
@@ -367,7 +386,7 @@ function renderChallenge(ch) {
 }
 
 // ===========================
-// Receive state
+// Receive state from server
 // ===========================
 socket.on("state", (s) => {
   if (!s) return;
@@ -378,20 +397,17 @@ socket.on("state", (s) => {
   renderChallenge(s.currentChallenge);
 
   const ch = s.currentChallenge;
-
   const isLockedGP =
     ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
-  // normal compare
   let iAmFirstBuzz =
     joined &&
     isLockedGP &&
     ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
-  // fallback: if I buzzed this round within last 8s, treat as first
   if (!iAmFirstBuzz && isLockedGP) {
     const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
@@ -409,4 +425,3 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 });
-
