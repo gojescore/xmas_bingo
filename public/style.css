@@ -420,6 +420,12 @@ body.nissegaaden-mode #challengeText {
   filter: brightness(0.97);
 }
 
+.facit-text {
+  color: #b11111;     /* same Christmas red */
+  font-weight: 700;
+}
+
+
 
 
 
