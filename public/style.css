@@ -280,6 +280,21 @@ body.nissegaaden-mode #challengeText {
   border-color: #4caf50;
   box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
 }
+/* Score number spacing between + and - */
+.team-points {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.team-points span {
+  min-width: 36px;
+  padding: 0 8px;
+  text-align: center;
+  display: inline-block;
+  font-weight: 700;
+}
+
 
 /* ---------------------------------------------------------
    MOBILE RESPONSIVE
@@ -404,6 +419,7 @@ body.nissegaaden-mode #challengeText {
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   filter: brightness(0.97);
 }
+
 
 
 
