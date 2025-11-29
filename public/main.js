@@ -1,4 +1,4 @@
-// public/main.js v35 (with facit line + reload deck button)
+// public/main.js v35 (with facit line + reload deck button + point toasts)
 
 // =====================================================
 // SOCKET
@@ -17,7 +17,7 @@ const addTeamBtn = document.getElementById("addTeamBtn");
 const teamListEl = document.getElementById("teamList");
 
 const currentChallengeText = document.getElementById("currentChallengeText");
-const facitLine = document.getElementById("facitLine"); // 👈 new facit line
+const facitLine = document.getElementById("facitLine"); // 👈 facit line
 const yesBtn = document.getElementById("yesBtn");
 const noBtn = document.getElementById("noBtn");
 const incompleteBtn = document.getElementById("incompleteBtn");
@@ -41,6 +41,53 @@ let currentChallenge = null;
 let gameCode = null;
 
 const STORAGE_KEY = "xmasChallenge_admin_v35";
+
+// for toast diff detection
+let previousTeamsPoints = []; // [{ id, points }]
+
+// =====================================================
+// Toast helper for point changes
+// =====================================================
+let toastTimeoutId = null;
+
+function showPointToast(message, isLoss = false) {
+  let toast = document.getElementById("pointToast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "pointToast";
+    toast.style.position = "fixed";
+    toast.style.left = "50%";
+    toast.style.bottom = "30px";
+    toast.style.transform = "translateX(-50%)";
+    toast.style.padding = "10px 18px";
+    toast.style.borderRadius = "999px";
+    toast.style.fontWeight = "800";
+    toast.style.fontSize = "1.1rem";
+    toast.style.color = "#fff";
+    toast.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
+    toast.style.opacity = "0";
+    toast.style.transition = "opacity 0.4s ease";
+    toast.style.zIndex = "9999";
+    toast.style.pointerEvents = "none";
+    document.body.appendChild(toast);
+  }
+
+  toast.textContent = message;
+  toast.style.background = isLoss
+    ? "rgba(183, 28, 28, 0.95)" // red for point loss
+    : "rgba(27, 94, 32, 0.95)"; // green for point gain
+
+  // force reflow so transition always plays
+  void toast.offsetWidth;
+
+  toast.style.opacity = "1";
+
+  if (toastTimeoutId) clearTimeout(toastTimeoutId);
+  toastTimeoutId = setTimeout(() => {
+    toast.style.opacity = "0";
+    toastTimeoutId = null;
+  }, 4000);
+}
 
 // =====================================================
 // Persistence
@@ -120,7 +167,7 @@ async function loadDeckSafely() {
     kn = m.DECK || m.kreaNissenDeck || m.deck || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk, ...kn].map(c => ({ ...c, used: !!c.used }));
+  deck = [...gp, ...ng, ...jk, ...kn].map((c) => ({ ...c, used: !!c.used }));
 
   renderDeck();
   renderTeams();
@@ -154,7 +201,7 @@ function renderDeck() {
     return;
   }
 
-  deck.forEach(card => {
+  deck.forEach((card) => {
     const btn = document.createElement("button");
     btn.className = "challenge-card";
     btn.textContent = card.title || card.type;
@@ -179,37 +226,33 @@ function renderDeck() {
           typedAnswer: null,
           answeredTeams: {}
         };
-      }
-      else if (card.type === "JuleKortet") {
+      } else if (card.type === "JuleKortet") {
         currentChallenge = {
           ...card,
           phase: "writing",
           writingSeconds: 120,
           writingStartAt: Date.now(),
-          cards: [],        // [{ teamName, text }]
+          cards: [], // [{ teamName, text }]
           votingCards: [],
-          votes: {},        // { voterTeamName: index }
+          votes: {}, // { voterTeamName: index }
           winners: []
         };
         startAdminWritingTimer();
-      }
-      else if (card.type === "KreaNissen") {
+      } else if (card.type === "KreaNissen") {
         currentChallenge = {
           ...card,
           phase: "creating",
           creatingSeconds: 180,
           creatingStartAt: Date.now(),
-          photos: [],        // [{ teamName, filename }]
-          votingPhotos: [],  // [{ filename, ownerTeamName }]
-          votes: {},         // { voterTeamName: index }
+          photos: [], // [{ teamName, filename }]
+          votingPhotos: [], // [{ filename, ownerTeamName }]
+          votes: {}, // { voterTeamName: index }
           winners: []
         };
         startAdminCreatingTimer();
-      }
-      else if (card.type === "NisseGåden") {
+      } else if (card.type === "NisseGåden") {
         currentChallenge = { ...card, answers: [] };
-      }
-      else {
+      } else {
         currentChallenge = { ...card };
       }
 
@@ -229,10 +272,15 @@ function renderDeck() {
 }
 
 // =====================================================
-// Leaderboard
+// Leaderboard (NOW with toast detection)
 // =====================================================
 function renderTeams() {
-  const sorted = [...teams].sort((a,b) => {
+  // map of previous points by id
+  const prevMap = new Map(
+    (previousTeamsPoints || []).map((t) => [t.id, t.points ?? 0])
+  );
+
+  const sorted = [...teams].sort((a, b) => {
     if ((b.points ?? 0) !== (a.points ?? 0))
       return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
@@ -240,7 +288,9 @@ function renderTeams() {
 
   teamListEl.innerHTML = "";
 
-  sorted.forEach(team => {
+  const changedEvents = []; // { teamName, diff }
+
+  sorted.forEach((team) => {
     const li = document.createElement("li");
     li.className =
       "team-item" + (team.id === selectedTeamId ? " selected" : "");
@@ -257,7 +307,9 @@ function renderTeams() {
     minus.onclick = (e) => {
       e.stopPropagation();
       team.points = Math.max(0, (team.points ?? 0) - 1);
-      saveLocal(); renderTeams(); syncToServer();
+      saveLocal();
+      renderTeams();
+      syncToServer();
     };
 
     const val = document.createElement("span");
@@ -268,7 +320,9 @@ function renderTeams() {
     plus.onclick = (e) => {
       e.stopPropagation();
       team.points = (team.points ?? 0) + 1;
-      saveLocal(); renderTeams(); syncToServer();
+      saveLocal();
+      renderTeams();
+      syncToServer();
     };
 
     pointsDiv.append(minus, val, plus);
@@ -280,6 +334,30 @@ function renderTeams() {
     };
 
     teamListEl.appendChild(li);
+
+    // ----- detect point change for this team -----
+    const prevPts = prevMap.has(team.id) ? prevMap.get(team.id) : null;
+    const curPts = team.points ?? 0;
+
+    if (prevPts !== null && curPts !== prevPts) {
+      const diff = curPts - prevPts;
+      changedEvents.push({ teamName: team.name, diff });
+    }
+  });
+
+  // store current points snapshot for next diff
+  previousTeamsPoints = sorted.map((t) => ({
+    id: t.id,
+    points: t.points ?? 0
+  }));
+
+  // show toasts AFTER DOM update
+  changedEvents.forEach(({ teamName, diff }) => {
+    if (diff > 0) {
+      showPointToast(`${teamName} har fået point!`, false);
+    } else if (diff < 0) {
+      showPointToast(`${teamName} har tabt point!`, true);
+    }
   });
 }
 
@@ -305,11 +383,13 @@ function renderCurrentChallenge() {
   // Fallback text ONLY if no "answer" exists in the deck
   if (!facitText) {
     if (currentChallenge.type === "Nisse Grandprix") {
-      facitText = "Eleverne lytter til sangen og buzzer, når de kender svaret.";
+      facitText =
+        "Eleverne lytter til sangen og buzzer, når de kender svaret.";
     } else if (currentChallenge.type === "NisseGåden") {
       facitText = "Eleverne skal gætte gåden og skrive deres svar.";
     } else if (currentChallenge.type === "JuleKortet") {
-      facitText = "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
+      facitText =
+        "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
     } else if (currentChallenge.type === "KreaNissen") {
       facitText = "Eleverne laver noget kreativt og sender et billede.";
     }
@@ -320,7 +400,6 @@ function renderCurrentChallenge() {
     facitLine.textContent = facitText ? `Facit: ${facitText}` : "";
   }
 }
-
 
 // =====================================================
 // Admin minigame area
@@ -343,9 +422,15 @@ function renderMiniGameArea() {
     wrap.innerHTML = `
       <h3>Nisse Grandprix</h3>
       <p><strong>Fase:</strong> ${currentChallenge.phase}</p>
-      <p><strong>Buzzed først:</strong> ${currentChallenge.firstBuzz?.teamName || "—"}</p>
-      <p><strong>Svar fra:</strong> ${currentChallenge.typedAnswer?.teamName || "—"}</p>
-      <p><strong>Tekst:</strong> ${currentChallenge.typedAnswer?.text || "—"}</p>
+      <p><strong>Buzzed først:</strong> ${
+        currentChallenge.firstBuzz?.teamName || "—"
+      }</p>
+      <p><strong>Svar fra:</strong> ${
+        currentChallenge.typedAnswer?.teamName || "—"
+      }</p>
+      <p><strong>Tekst:</strong> ${
+        currentChallenge.typedAnswer?.text || "—"
+      }</p>
       <p><strong>Nedtælling:</strong> <span id="gpAdminCountdown">—</span></p>
     `;
     miniGameArea.appendChild(wrap);
@@ -367,7 +452,7 @@ function renderMiniGameArea() {
       p.textContent = "Ingen svar endnu…";
       wrap.appendChild(p);
     } else {
-      answers.forEach(a => {
+      answers.forEach((a) => {
         const box = document.createElement("div");
         box.style.cssText =
           "padding:8px; border:1px solid #ddd; border-radius:8px; margin-bottom:6px; background:#fff;";
@@ -555,7 +640,7 @@ function startVotingPhase() {
   if (currentChallenge.phase !== "writing") return;
 
   const votingCards = shuffle(
-    currentChallenge.cards.map(c => ({
+    currentChallenge.cards.map((c) => ({
       text: c.text,
       ownerTeamName: c.teamName || c.team
     }))
@@ -573,7 +658,7 @@ function startVotingPhase() {
 
 function tallyVotes(votesObj, cardsLen) {
   const counts = Array(cardsLen).fill(0);
-  Object.values(votesObj).forEach(idx => {
+  Object.values(votesObj).forEach((idx) => {
     if (typeof idx === "number" && idx >= 0 && idx < cardsLen) counts[idx]++;
   });
   return counts;
@@ -589,15 +674,15 @@ function finishVotingAndAward() {
 
   const winningIndexes = counts
     .map((c, i) => ({ i, c }))
-    .filter(x => x.c === max)
-    .map(x => x.i);
+    .filter((x) => x.c === max)
+    .map((x) => x.i);
 
   const winners = winningIndexes
-    .map(i => cards[i].ownerTeamName)
+    .map((i) => cards[i].ownerTeamName)
     .filter(Boolean);
 
-  winners.forEach(name => {
-    const t = teams.find(x => x.name === name);
+  winners.forEach((name) => {
+    const t = teams.find((x) => x.name === name);
     if (t) t.points = (t.points ?? 0) + 1;
   });
 
@@ -647,7 +732,7 @@ function startKreaVotingPhase() {
   if (currentChallenge.phase !== "creating") return;
 
   const votingPhotos = shuffle(
-    currentChallenge.photos.map(p => ({
+    currentChallenge.photos.map((p) => ({
       filename: p.filename,
       ownerTeamName: p.teamName || p.team
     }))
@@ -673,15 +758,15 @@ function finishKreaVotingAndAward() {
 
   const winningIndexes = counts
     .map((c, i) => ({ i, c }))
-    .filter(x => x.c === max)
-    .map(x => x.i);
+    .filter((x) => x.c === max)
+    .map((x) => x.i);
 
   const winners = winningIndexes
-    .map(i => photos[i].ownerTeamName)
+    .map((i) => photos[i].ownerTeamName)
     .filter(Boolean);
 
-  winners.forEach(name => {
-    const t = teams.find(x => x.name === name);
+  winners.forEach((name) => {
+    const t = teams.find((x) => x.name === name);
     if (t) t.points = (t.points ?? 0) + 1;
   });
 
@@ -704,8 +789,13 @@ function startAdminGpCountdownIfLocked() {
   if (!currentChallenge.countdownStartAt) return;
 
   gpAdminTimer = setInterval(() => {
-    const elapsed = Math.floor((Date.now() - currentChallenge.countdownStartAt) / 1000);
-    const left = Math.max(0, (currentChallenge.countdownSeconds || 20) - elapsed);
+    const elapsed = Math.floor(
+      (Date.now() - currentChallenge.countdownStartAt) / 1000
+    );
+    const left = Math.max(
+      0,
+      (currentChallenge.countdownSeconds || 20) - elapsed
+    );
     const elc = document.getElementById("gpAdminCountdown");
     if (elc) elc.textContent = left;
     if (left <= 0) clearInterval(gpAdminTimer);
@@ -731,7 +821,7 @@ yesBtn.onclick = () => {
 
   stopGpAudioEverywhere();
 
-  const t = teams.find(x => x.id === selectedTeamId);
+  const t = teams.find((x) => x.id === selectedTeamId);
   if (t) t.points = (t.points ?? 0) + 1;
 
   currentChallenge = null;
@@ -806,7 +896,7 @@ resetBtn.onclick = () => {
   teams = [];
   selectedTeamId = null;
   currentChallenge = null;
-  deck.forEach(c => (c.used = false));
+  deck.forEach((c) => (c.used = false));
   endGameResultEl.textContent = "";
 
   renderTeams();
@@ -823,14 +913,14 @@ endGameBtn.onclick = () => {
 
   stopGpAudioEverywhere();
 
-  const sorted = [...teams].sort((a,b)=>(b.points??0)-(a.points??0));
+  const sorted = [...teams].sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
   const topScore = sorted[0].points;
-  const winners = sorted.filter(t => t.points === topScore);
+  const winners = sorted.filter((t) => t.points === topScore);
 
   endGameResultEl.textContent =
     winners.length === 1
       ? `Vinderen er: ${winners[0].name} med ${topScore} point! 🎉`
-      : `Uafgjort: ${winners.map(x => x.name).join(", ")} – ${topScore} point.`;
+      : `Uafgjort: ${winners.map((x) => x.name).join(", ")} – ${topScore} point.`;
 
   saveLocal();
   syncToServer();
@@ -858,7 +948,7 @@ addTeamBtn.onclick = () => {
   const name = teamNameInput.value.trim();
   if (!name) return;
 
-  if (teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
+  if (teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
     alert("Navnet findes allerede.");
     return;
   }
@@ -886,7 +976,7 @@ socket.on("buzzed", (teamName) => {
   currentChallenge.countdownStartAt = Date.now();
   currentChallenge.typedAnswer = null;
 
-  const t = teams.find(x => x.name === teamName);
+  const t = teams.find((x) => x.name === teamName);
   if (t) selectedTeamId = t.id;
 
   renderTeams();
@@ -918,8 +1008,13 @@ socket.on("newCard", ({ teamName, text }) => {
     currentChallenge.answers.push({ teamName, text });
   }
 
-  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
-    const already = currentChallenge.cards.some(c => (c.teamName || c.team) === teamName);
+  if (
+    currentChallenge.type === "JuleKortet" &&
+    currentChallenge.phase === "writing"
+  ) {
+    const already = currentChallenge.cards.some(
+      (c) => (c.teamName || c.team) === teamName
+    );
     if (!already) currentChallenge.cards.push({ teamName, text });
   }
 
@@ -933,7 +1028,9 @@ socket.on("newPhoto", ({ teamName, filename }) => {
   if (!currentChallenge || currentChallenge.type !== "KreaNissen") return;
   if (currentChallenge.phase !== "creating") return;
 
-  const already = currentChallenge.photos.some(p => (p.teamName || p.team) === teamName);
+  const already = currentChallenge.photos.some(
+    (p) => (p.teamName || p.team) === teamName
+  );
   if (!already) currentChallenge.photos.push({ teamName, filename });
 
   renderMiniGameArea();
@@ -989,5 +1086,3 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
-
