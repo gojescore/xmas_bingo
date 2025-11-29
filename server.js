@@ -39,6 +39,11 @@ const makeCode = () => String(Math.floor(1000 + Math.random() * 9000));
 // Socket.io
 // --------------------
 io.on("connection", (socket) => {
+    socket.on("points-toast", (payload) => {
+    // payload: { teamName, delta }
+    io.emit("points-toast", payload);
+  });
+
   console.log("New client:", socket.id);
   socket.emit("state", state);
 
@@ -175,3 +180,4 @@ app.get("/", (req, res) => res.send("Xmas Challenge Server Running"));
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => console.log("Server listening on port", PORT));
+
