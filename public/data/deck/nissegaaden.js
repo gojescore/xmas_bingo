@@ -2,9 +2,9 @@ export const nisseGaaden = [
   {
     id: "ng1",
     type: "NisseGåden",
-    title: "NisseGåden 1",
-    text: "Hvad går gennem byen uden at røre en eneste snefnug?",
-    answer: "Vejen",
+    title: "Hvem er jeg?",
+    text: "Jeg kommer om natten, jeg er ikke et dyr, jeg bringer gaver",
+    answer: "Julemanden",
     used: false
   },
   {
@@ -32,3 +32,4 @@ export const nisseGaaden = [
     used: false
   }
 ];
+
