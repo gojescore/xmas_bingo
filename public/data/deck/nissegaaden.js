@@ -27,7 +27,7 @@ export const nisseGaaden = [
     id: "ng4",
     type: "NisseGåden",
     title: "Hvad er jeg (3)",
-    text: "Jeg er sød, jeg er rød og hvid. Jeg chiller på tit på en gren",
+    text: "Jeg er sød, jeg er rød og hvid. Jeg chiller tit på en gren",
     answer: "En sukkerstok",
     used: false
   },
@@ -73,6 +73,7 @@ export const nisseGaaden = [
   }
 
 ];
+
 
 
 
