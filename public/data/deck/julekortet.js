@@ -2,46 +2,47 @@ export const juleKortetDeck = [
   {
     id: "j1",
     type: "JuleKortet",
-    title: "Snemandens sidste tanker",
+    title: "JK - Snemandens sidste tanker",
     text: "Hvad er en snemands sidste tanker, før den smelter?",
     answer: "Eleverne stemmer",
   },
   {
     id: "j2",
     type: "JuleKortet",
-    title: "Værste gave",
+    title: "JK - Værste gave",
     text: "Den værste gave, selv the Grinch ikke ville stjæle!",
     answer: "Eleverne stemmer",
   },
     {
     id: "j3",
     type: "JuleKortet",
-    title: "Uartiglisten",
+    title: "JK - Uartiglisten",
     text: "Den hurtigste måde at komme på uartig-listen!",
     answer: "Eleverne stemmer",
   },
       {
     id: "j4",
     type: "JuleKortet",
-    title: "Mellemnavn",
+    title: "JK - Mellemnavn",
     text: "Hvad er julemanden hemmelige mellemnavn?",
     answer: "Eleverne stemmer",
   },
         {
     id: "j5",
     type: "JuleKortet",
-    title: "julegaven",
+    title: "JK - julegaven",
     text: "En lyd, man ikke har lyst til at høre, når man ryster sin julegave!",
     answer: "Eleverne stemmer",
   },
         {
     id: "j6",
     type: "JuleKortet",
-    title: "Julehilsen",
+    title: "JK - Julehilsen",
     text: "Skriv den varmeste julehilsen til alle på skolen.",
     answer: "Eleverne stemmer",
   },
 ];
+
 
 
 
