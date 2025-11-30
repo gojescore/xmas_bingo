@@ -36,9 +36,10 @@ export const nisseGaaden = [
     type: "NisseGåden",
     title: "Hvad er jeg4",
     text: "Jeg ringer, men har ingen mobil. Jeg findes oftest i sølv eller guld!",
-    answer: "En sukkerstok",
+    answer: "En klokke",
     used: false
   }
 ];
+
 
 
