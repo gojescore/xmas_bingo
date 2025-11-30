@@ -38,10 +38,11 @@ export const juleKortetDeck = [
     id: "j6",
     type: "JuleKortet",
     title: "Julehilsen",
-    text: Skriv den varmeste julehilsen til alle på skolen.",
+    text: "Skriv den varmeste julehilsen til alle på skolen.",
     answer: "Eleverne stemmer",
   },
 ];
+
 
 
 
