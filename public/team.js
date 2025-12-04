@@ -6,6 +6,8 @@ import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
+import { renderBilledeQuiz, stopBilledeQuiz } from "./minigames/billedequiz.js";
+
 
 const socket = io();
 const el = (id) => document.getElementById(id);
@@ -377,12 +379,14 @@ function hideGrandprixPopup() {
 function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
-
+  
   // Stop all mini-games before switch
   stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
+  stopBilledeQuiz(api); // 👈 NY
+
 
   if (!ch) {
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -422,6 +426,11 @@ function renderChallenge(ch) {
 
   if (ch.type === "KreaNissen") {
     renderKreaNissen(ch, api, socket, myTeamName);
+    return;
+  }
+
+    if (ch.type === "BilledeQuiz") {
+    renderBilledeQuiz(ch, api);
     return;
   }
 
@@ -473,4 +482,5 @@ socket.on("state", (s) => {
 socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
 });
+
 
