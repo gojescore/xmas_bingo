@@ -1,183 +1,211 @@
-// server.js v36
-// Backward compatible: joinGame + joinTeam both work.
-// Safe gameCode guard so admin sync can’t wipe it.
+// server.js
+// Xmas Challenge – main + team + minigames + point toasts
 
 const express = require("express");
-const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
-const multer = require("multer");
+const http = require("http");
+const path = require("path");
 const fs = require("fs");
+const multer = require("multer");
+const { Server } = require("socket.io");
 
-// --------------------
-// Static + uploads
-// --------------------
-if (!fs.existsSync("./uploads")) fs.mkdirSync("./uploads");
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-app.use(express.static("public"));
-app.use("/uploads", express.static("uploads"));
+// -----------------------------------------------------
+// STATIC FILES
+// -----------------------------------------------------
+const PUBLIC_DIR = path.join(__dirname, "public");
+const UPLOAD_DIR = path.join(__dirname, "uploads");
 
-const upload = multer({ dest: "./uploads/" });
+// Ensure uploads folder exists (for KreaNissen photos)
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+app.use(express.static(PUBLIC_DIR));
+app.use("/uploads", express.static(UPLOAD_DIR));
+
+// -----------------------------------------------------
+// FILE UPLOAD (KreaNissen)
+// -----------------------------------------------------
+const upload = multer({ dest: UPLOAD_DIR });
+
 app.post("/upload", upload.single("file"), (req, res) => {
-  res.json({ filename: req.file.filename });
+  if (!req.file) {
+    return res.status(400).json({ ok: false, message: "Ingen fil modtaget." });
+  }
+  // Client only needs filename, image is served from /uploads/<filename>
+  res.json({ ok: true, filename: req.file.filename });
 });
 
-// --------------------
-// Global state
-// --------------------
+// -----------------------------------------------------
+// GAME STATE (kept in memory on the server)
+// -----------------------------------------------------
 let state = {
-  gameCode: null,
   teams: [],
   deck: [],
   currentChallenge: null,
+  gameCode: null,
 };
 
-const normalize = (s) => (s || "").trim().toLowerCase();
-const makeCode = () => String(Math.floor(1000 + Math.random() * 9000));
+// Helper to compare old/new team points
+function indexTeamsByKey(teams) {
+  const map = new Map();
+  for (const t of teams || []) {
+    const key = (t.id || t.name || "").toLowerCase();
+    if (key) map.set(key, t);
+  }
+  return map;
+}
 
-// --------------------
-// Socket.io
-// --------------------
+// -----------------------------------------------------
+// SOCKET.IO
+// -----------------------------------------------------
 io.on("connection", (socket) => {
-    socket.on("points-toast", (payload) => {
-    // payload: { teamName, delta }
-    io.emit("points-toast", payload);
-  });
+  console.log("Client connected:", socket.id);
 
-  console.log("New client:", socket.id);
+  // Send current state to new client (main or team)
   socket.emit("state", state);
 
-  // ADMIN updates whole state
-  socket.on("updateState", (incoming) => {
-    if (!incoming || typeof incoming !== "object") return;
+  // ---------------------------------------------
+  // TEAMS: joinGame (code + team name)
+  // ---------------------------------------------
+  socket.on("joinGame", ({ code, teamName }, cb) => {
+    try {
+      const trimmedName = (teamName || "").trim();
+      if (!trimmedName) {
+        cb && cb({ ok: false, message: "Tomt teamnavn." });
+        return;
+      }
 
-    // ✅ Never wipe gameCode unless a real one is sent
-    if (
-      incoming.gameCode !== undefined &&
-      incoming.gameCode !== null &&
-      String(incoming.gameCode).trim() !== ""
-    ) {
-      state.gameCode = String(incoming.gameCode).trim();
+      if (!state.gameCode || String(code) !== String(state.gameCode)) {
+        cb && cb({ ok: false, message: "Forkert kode." });
+        return;
+      }
+
+      // Either reuse existing team or create new one
+      let team = state.teams.find(
+        (t) => (t.name || "").toLowerCase() === trimmedName.toLowerCase()
+      );
+
+      if (!team) {
+        team = {
+          id: "t" + Date.now() + Math.random(),
+          name: trimmedName,
+          points: 0,
+        };
+        state.teams.push(team);
+        io.emit("state", state);
+      }
+
+      // Remember which team this socket belongs to (for buzz etc.)
+      socket.data.teamName = team.name;
+
+      cb && cb({ ok: true, team });
+    } catch (err) {
+      console.error("joinGame error:", err);
+      cb && cb({ ok: false, message: "Server-fejl ved join." });
+    }
+  });
+
+  // ---------------------------------------------
+  // MAIN: updateState (admin sends full game state)
+  // ---------------------------------------------
+  socket.on("updateState", (newState) => {
+    if (!newState) return;
+
+    // 1) Compute point changes for toasts
+    const oldIndex = indexTeamsByKey(state.teams);
+    const newTeams = Array.isArray(newState.teams)
+      ? newState.teams
+      : state.teams;
+
+    for (const t of newTeams) {
+      const key = (t.id || t.name || "").toLowerCase();
+      if (!key) continue;
+
+      const old = oldIndex.get(key);
+      const oldPts = old?.points ?? 0;
+      const newPts = t.points ?? 0;
+      const delta = newPts - oldPts;
+
+      if (delta !== 0) {
+        // Broadcast toast to ALL teams and main
+        io.emit("points-toast", { teamName: t.name, delta });
+      }
     }
 
-    if (Array.isArray(incoming.teams)) state.teams = incoming.teams;
-    if (Array.isArray(incoming.deck) && incoming.deck.length > 0) state.deck = incoming.deck;
-    if (incoming.currentChallenge !== undefined) state.currentChallenge = incoming.currentChallenge;
+    // 2) Replace state with new one (keep same shape)
+    state = {
+      ...state,
+      ...newState,
+      teams: newTeams,
+    };
 
+    // 3) Broadcast new full state
     io.emit("state", state);
   });
 
-  // ADMIN starts new game
-  socket.on("startGame", (ack) => {
-    state.gameCode = makeCode();
-    state.teams = [];
-    state.currentChallenge = null;
-
-    console.log("Game started. Code:", state.gameCode);
-    io.emit("state", state);
-
-    if (typeof ack === "function") ack({ ok: true, gameCode: state.gameCode });
-  });
-
-  // --------------------
-  // JOIN HANDLERS (both)
-  // --------------------
-  function handleJoin({ code, teamName }, ack) {
-    const c = String(code || "").trim();
-    const n = String(teamName || "").trim();
-
-    console.log("Join attempt:", { code: c, teamName: n, serverCode: state.gameCode });
-
-    if (!state.gameCode || c !== state.gameCode) {
-      if (typeof ack === "function") ack({ ok: false, message: "Forkert kode" });
-      return;
-    }
-
-    if (!n) {
-      if (typeof ack === "function") ack({ ok: false, message: "Skriv et teamnavn" });
-      return;
-    }
-
-    if (state.teams.some(t => normalize(t.name) === normalize(n))) {
-      if (typeof ack === "function") ack({ ok: false, message: "Navnet er allerede taget" });
-      return;
-    }
-
-    const team = { id: "t" + Date.now(), name: n, points: 0 };
-    state.teams.push(team);
-
-    socket.teamName = n;
-
-    io.emit("state", state);
-    if (typeof ack === "function") ack({ ok: true, team });
-  }
-
-  // New event name
-  socket.on("joinGame", handleJoin);
-
-  // Old event name (fallback)
-  socket.on("joinTeam", (teamName, ack) => {
-    handleJoin({ code: state.gameCode, teamName }, ack);
-  });
-
-  // --------------------
-  // Gameplay events
-  // --------------------
+  // ---------------------------------------------
+  // GRANDPRIX: buzz (team -> main)
+  // ---------------------------------------------
   socket.on("buzz", () => {
-    const who = socket.teamName || "Ukendt hold";
-    io.emit("buzzed", who);
+    const teamName = socket.data.teamName;
+    if (!teamName) return;
+
+    // Main (admin) listens for "buzzed" and updates currentChallenge itself
+    io.emit("buzzed", teamName);
   });
 
+  // ---------------------------------------------
+  // GRANDPRIX: typed answer (team -> main)
+  // ---------------------------------------------
   socket.on("gp-typed-answer", (payload) => {
+    // Forward directly – main updates state and calls updateState
     io.emit("gp-typed-answer", payload);
   });
 
+  // ---------------------------------------------
+  // NISSEGÅDEN / JULEKORTET: submit text card
+  // ---------------------------------------------
   socket.on("submitCard", (payload) => {
-    let teamName, text;
-
-    if (typeof payload === "string") {
-      teamName = socket.teamName;
-      text = payload;
-    } else {
-      teamName = payload?.teamName || socket.teamName;
-      text = payload?.text;
-    }
-    if (!teamName || !text) return;
-
-    io.emit("newCard", { teamName, text });
+    // payload: { teamName, text }
+    io.emit("newCard", payload);
   });
 
-  socket.on("submitPhoto", (payload) => {
-    let teamName, filename;
-
-    if (typeof payload === "string") {
-      teamName = socket.teamName;
-      filename = payload;
-    } else {
-      teamName = payload?.teamName || socket.teamName;
-      filename = payload?.filename || payload?.file;
-    }
-    if (!teamName || !filename) return;
-
-    io.emit("newPhoto", { teamName, filename });
+  // ---------------------------------------------
+  // KREANISSEN: new uploaded photo
+  // ---------------------------------------------
+  socket.on("newPhoto", (payload) => {
+    // payload: { teamName, filename }
+    io.emit("newPhoto", payload);
   });
 
-  socket.on("vote", (index) => {
-    const voter = socket.teamName || "Ukendt hold";
-    io.emit("voteUpdate", { voter, index });
+  // ---------------------------------------------
+  // Voting (JuleKortet + KreaNissen)
+  // ---------------------------------------------
+  socket.on("voteUpdate", (payload) => {
+    // payload: { voter, index }
+    io.emit("voteUpdate", payload);
   });
 
+  // ---------------------------------------------
+  // Grandprix: stop audio everywhere
+  // ---------------------------------------------
   socket.on("gp-stop-audio-now", () => {
     io.emit("gp-stop-audio-now");
   });
 
   socket.on("disconnect", () => {
-    console.log("Disconnected:", socket.id);
+    console.log("Client disconnected:", socket.id);
   });
 });
 
-app.get("/", (req, res) => res.send("Xmas Challenge Server Running"));
-
+// -----------------------------------------------------
+// START SERVER
+// -----------------------------------------------------
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => console.log("Server listening on port", PORT));
-
+server.listen(PORT, () => {
+  console.log("Xmas Challenge server listening on port", PORT);
+});
