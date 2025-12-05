@@ -55,6 +55,7 @@ function indexTeamsByKey(teams) {
   for (const t of teams || []) {
     const key = (t.id || t.name || "").toLowerCase();
     if (key) map.set(key, t);
+    return map;
   }
   return map;
 }
@@ -168,25 +169,54 @@ io.on("connection", (socket) => {
 
   // ---------------------------------------------
   // NISSEGÅDEN / JULEKORTET: submit text card
+  //  - Accepts BOTH:
+  //      { teamName, text }
+  //    and
+  //      "bare selve teksten"
   // ---------------------------------------------
   socket.on("submitCard", (payload) => {
-    // payload: { teamName, text }
-    io.emit("newCard", payload);
+    let teamName = null;
+    let text = "";
+
+    if (typeof payload === "string") {
+      text = payload;
+      teamName = socket.data.teamName || null;
+    } else if (payload && typeof payload === "object") {
+      text = payload.text ?? "";
+      teamName = payload.teamName || socket.data.teamName || null;
+    }
+
+    io.emit("newCard", { teamName, text });
   });
 
   // ---------------------------------------------
   // KREANISSEN: new uploaded photo
+  //  - Clients emit: socket.emit("submitPhoto", { teamName, filename })
+  //  - Admin/main listens on "newPhoto"
   // ---------------------------------------------
+  socket.on("submitPhoto", ({ teamName, filename }) => {
+    if (!filename) return;
+    const realTeamName = teamName || socket.data.teamName || "Ukendt hold";
+    io.emit("newPhoto", { teamName: realTeamName, filename });
+  });
+
+  // (Optional backwards compatibility, if nogen stadig skulle bruge "newPhoto" direkte)
   socket.on("newPhoto", (payload) => {
-    // payload: { teamName, filename }
     io.emit("newPhoto", payload);
   });
 
   // ---------------------------------------------
   // Voting (JuleKortet + KreaNissen)
+  //  - Clients emit: socket.emit("vote", index)
+  //  - Admin/main expects "voteUpdate" med { voter, index }
   // ---------------------------------------------
+  socket.on("vote", (index) => {
+    const voter = socket.data.teamName || "Ukendt hold";
+    io.emit("voteUpdate", { voter, index });
+  });
+
+  // (Backwards compatibility hvis nogen sender voteUpdate direkte)
   socket.on("voteUpdate", (payload) => {
-    // payload: { voter, index }
     io.emit("voteUpdate", payload);
   });
 
