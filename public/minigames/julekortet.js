@@ -134,7 +134,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       sendBtn.disabled = true;
       statusEl.textContent = "✅ Kort sendt!";
 
-      socket.emit("submitCard", text);
+     socket.emit("submitCard", { teamName: myTeamName, text });
 
       setTimeout(() => (popup.style.display = "none"), 600);
     }
@@ -147,7 +147,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
       textarea.readOnly = true;
       sendBtn.disabled = true;
 
-      if (text) socket.emit("submitCard", text);
+      if (text) socket.emit("submitCard", { teamName: myTeamName, text });
 
       setTimeout(() => (popup.style.display = "none"), 600);
     }
@@ -227,3 +227,4 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
     setTimeout(() => (popup.style.display = "none"), 6000);
   }
 }
+
