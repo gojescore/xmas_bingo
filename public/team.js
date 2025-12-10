@@ -1,4 +1,4 @@
-// public/team.js v40
+// public/team.js v41
 // Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen/BilledeQuiz)
 
 // Mini-games
@@ -61,10 +61,38 @@ function showScoreToast(teamName, delta) {
     document.body.appendChild(scoreToastEl);
   }
 
-  // ---------- Winner overlay (same look as main) ----------
+  const abs = Math.abs(delta);
+  const pointWord = abs === 1 ? "point" : "point";
+  const msg =
+    delta > 0
+      ? `${teamName} har fået ${abs} ${pointWord}!`
+      : `${teamName} har mistet ${abs} ${pointWord}!`;
+
+  scoreToastEl.className = "score-toast";
+  if (delta > 0) {
+    scoreToastEl.classList.add("score-toast--gain");
+  } else {
+    scoreToastEl.classList.add("score-toast--loss");
+  }
+
+  scoreToastEl.textContent = msg;
+
+  // restart animation
+  void scoreToastEl.offsetWidth;
+
+  scoreToastEl.classList.add("score-toast--show");
+
+  if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
+
+  scoreToastTimeout = setTimeout(() => {
+    scoreToastEl.classList.remove("score-toast--show");
+  }, 4000);
+}
+
+// ---------- WINNER OVERLAY (shown when game ends) ----------
 let winnerOverlayEl = null;
 
-function showWinnerOverlay({ winners, topScore, message }) {
+function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   if (!winnerOverlayEl) {
     winnerOverlayEl = document.createElement("div");
     winnerOverlayEl.id = "winnerOverlay";
@@ -100,40 +128,20 @@ function showWinnerOverlay({ winners, topScore, message }) {
   const msgEl = document.getElementById("winnerOverlayMessage");
   const namesEl = document.getElementById("winnerOverlayNames");
 
-  if (msgEl) msgEl.textContent = message || "";
-  if (namesEl) namesEl.textContent = (winners && winners.length)
-    ? winners.join(", ")
-    : "Ingen vinder fundet";
-
-  winnerOverlayEl.style.display = "flex";
-}
-
-  const abs = Math.abs(delta);
-  const pointWord = abs === 1 ? "point" : "point";
-  const msg =
-    delta > 0
-      ? `${teamName} har fået ${abs} ${pointWord}!`
-      : `${teamName} har mistet ${abs} ${pointWord}!`;
-
-  scoreToastEl.className = "score-toast";
-  if (delta > 0) {
-    scoreToastEl.classList.add("score-toast--gain");
-  } else {
-    scoreToastEl.classList.add("score-toast--loss");
+  if (msgEl) {
+    msgEl.textContent =
+      message ||
+      (winners && winners.length
+        ? `Vinderen er: ${winners.join(", ")} med ${topScore} point!`
+        : "Spillet er slut!");
   }
 
-  scoreToastEl.textContent = msg;
+  if (namesEl) {
+    namesEl.textContent =
+      winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
+  }
 
-  // restart animation
-  void scoreToastEl.offsetWidth;
-
-  scoreToastEl.classList.add("score-toast--show");
-
-  if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
-
-  scoreToastTimeout = setTimeout(() => {
-    scoreToastEl.classList.remove("score-toast--show");
-  }, 4000);
+  winnerOverlayEl.style.display = "flex";
 }
 
 // ---------- Mini-game API ----------
@@ -149,7 +157,7 @@ const api = {
     if (buzzBtn) buzzBtn.disabled = true;
     hideGrandprixPopup();
     hideNisseGaadenAnswer();
-    stopBilledeQuiz(api);   // 👈 make sure billedequiz is hidden too
+    stopBilledeQuiz(api); // hide billedequiz if active
   }
 };
 
@@ -428,7 +436,7 @@ function renderChallenge(ch) {
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
-  stopBilledeQuiz(api);     // 👈 also stop billedequiz
+  stopBilledeQuiz(api);
 
   if (!ch) {
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -472,7 +480,7 @@ function renderChallenge(ch) {
   }
 
   if (ch.type === "BilledeQuiz") {
-    renderBilledeQuiz(ch, api);  // 👈 show picture + text
+    renderBilledeQuiz(ch, api);
     return;
   }
 
@@ -542,7 +550,7 @@ socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
 });
 
-// Winner overlay from server
+// NEW: Winner overlay on team clients
 socket.on("show-winner", (payload) => {
   showWinnerOverlay(payload || {});
 });
