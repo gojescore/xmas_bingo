@@ -59,7 +59,7 @@ export const juleKortetDeck = [
     id: "j9",
     type: "JuleKortet",
     title: "LærerKortet - Lang nat",
-    text: "Efter en lang nat hviskede julemanden, at han gerne ville have nogen til at kæle hans..!",
+    text: "Efter en lang nat hviskede julemanden..",
     answer: "Lærerne stemmer",
   },
              {
@@ -70,6 +70,7 @@ export const juleKortetDeck = [
     answer: "Lærerne stemmer",
   }
 ];
+
 
 
 
