@@ -55,6 +55,35 @@ function showScoreToast(teamName, delta) {
     scoreToastEl.className = "score-toast";
     document.body.appendChild(scoreToastEl);
   }
+
+  const abs = Math.abs(delta);
+  const pointWord = abs === 1 ? "point" : "point";
+  const msg =
+    delta > 0
+      ? `${teamName} har fået ${abs} ${pointWord}!`
+      : `${teamName} har mistet ${abs} ${pointWord}!`;
+
+  scoreToastEl.className = "score-toast";
+
+  if (delta > 0) {
+    scoreToastEl.classList.add("score-toast--gain");
+  } else {
+    scoreToastEl.classList.add("score-toast--loss");
+  }
+
+  scoreToastEl.textContent = msg;
+
+  // restart animation
+  void scoreToastEl.offsetWidth;
+
+  scoreToastEl.classList.add("score-toast--show");
+
+  if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
+  scoreToastTimeout = setTimeout(() => {
+    scoreToastEl.classList.remove("score-toast--show");
+  }, 4000);
+}
+
 // =====================================================
 // Winner overlay (shown on main + teams)
 // =====================================================
@@ -104,6 +133,7 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
 
   winnerOverlayEl.style.display = "flex";
 }
+
 
 
   const abs = Math.abs(delta);
@@ -1172,5 +1202,6 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
 
 
