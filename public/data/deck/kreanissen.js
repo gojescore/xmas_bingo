@@ -14,18 +14,12 @@ export const DECK = [
     id: "kn2",
     type: "KreaNissen",
     title: "KreaNissen 2",
-    text: "Byg en mini-juleby på bordet. Tag et billede!",
-    answer: "Eleverne stemmer (juleby)",
-    used: false
-  },
-  {
-    id: "kn3",
-    type: "KreaNissen",
-    title: "KreaNissen 3",
-    text: "Lav en kreativ julehat. Tag et billede!",
-    answer: "Eleverne stemmer (julehat)",
+    text: "Tag et julebillede af klassen!",
+    answer: "Eleverne stemmer (selfie)",
     used: false
   }
+ 
 ];
+
 
 
