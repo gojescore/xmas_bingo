@@ -148,6 +148,14 @@ io.on("connection", (socket) => {
     io.emit("state", state);
   });
 
+    // ---------------------------------------------
+  // Winner screen (admin -> all clients)
+  // ---------------------------------------------
+  socket.on("show-winner", (payload) => {
+    // payload: { winners: [names], topScore, message }
+    io.emit("show-winner", payload);
+  });
+
   // ---------------------------------------------
   // GRANDPRIX: buzz (team -> main)
   // ---------------------------------------------
@@ -239,3 +247,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
+
