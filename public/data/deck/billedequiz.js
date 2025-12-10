@@ -6,7 +6,7 @@ export const billedeQuizDeck = [
     type: "BilledeQuiz",
     title: "Billedquiz 1",
     text: "Hvem finder først nissen, og bringer den til os?",
-    imageUrl: "/assets/billeder/findNissen.png",
+    imageUrl: "/assets/billeder/findNissen.jpg",
     answer: "Nissehue",   // vises som facit på main-skærmen
     used: false
   },
@@ -21,6 +21,7 @@ export const billedeQuizDeck = [
   }
   // tilføj flere som du vil…
 ];
+
 
 
 
