@@ -1,6 +1,7 @@
 // public/team.js v41
-// Stable base (Grandprix/NisseGåden/JuleKortet/KreaNissen/BilledeQuiz + Xmas winner overlay)
+// Based on stable v40 + winner overlay
 
+// Mini-games
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
@@ -48,7 +49,7 @@ let gpSentThisRound = false;
 // NisseGåden: remember if we already answered this riddle round
 let ngAnsweredRoundId = null;
 
-// ---------- SCORE TOAST ----------
+// ---------- SCORE TOAST (all teams see point changes) ----------
 let scoreToastEl = null;
 let scoreToastTimeout = null;
 
@@ -88,98 +89,96 @@ function showScoreToast(teamName, delta) {
   }, 4000);
 }
 
-// ---------- Xmas Winner Overlay ----------
+// ---------- WINNER OVERLAY (team screen) ----------
 let winnerOverlayEl = null;
 
-function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
+function showWinnerOverlay(payload = {}) {
+  const { winners = [], topScore = 0, message = "" } = payload;
+
   if (!winnerOverlayEl) {
     winnerOverlayEl = document.createElement("div");
     winnerOverlayEl.id = "winnerOverlay";
     winnerOverlayEl.style.cssText = `
       position: fixed;
       inset: 0;
-      background:
-        radial-gradient(circle at top, #ffffff22 0, transparent 55%),
-        linear-gradient(135deg, #021526 0%, #200222 50%, #05301c 100%);
+      background: radial-gradient(circle at top, #fffae6 0, #560000 45%, #120008 100%);
       color: #fff;
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
       z-index: 9999;
       text-align: center;
       padding: 20px;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      cursor: pointer;
     `;
 
     winnerOverlayEl.innerHTML = `
       <div style="
-        max-width: 720px;
-        width: min(720px, 96vw);
-        background: rgba(15, 15, 30, 0.8);
+        max-width: 700px;
+        width: 100%;
         border-radius: 24px;
-        padding: 26px 22px 30px;
-        box-shadow: 0 16px 45px rgba(0,0,0,0.7);
-        border: 3px solid rgba(255,255,255,0.55);
-        backdrop-filter: blur(10px);
+        padding: 28px 18px 22px;
+        background: linear-gradient(145deg, rgba(0,0,0,0.75), rgba(120,0,0,0.9));
+        box-shadow: 0 14px 40px rgba(0,0,0,0.7);
         position: relative;
         overflow: hidden;
       ">
+        <!-- top garland -->
         <div style="
           position:absolute;
-          inset:-40px;
-          background-image:
-            radial-gradient(circle at 10% 0%, #ffffff33 0, transparent 55%),
-            radial-gradient(circle at 90% 100%, #ffd96633 0, transparent 55%),
-            repeating-linear-gradient(45deg,
-              rgba(255,255,255,0.15),
-              rgba(255,255,255,0.15) 2px,
-              transparent 2px,
-              transparent 6px
-            );
-          opacity:0.2;
-          pointer-events:none;
+          top:-4px; left:0; right:0;
+          height:24px;
+          background:
+            radial-gradient(circle at 10% 100%, #ffd966 0 12px, transparent 13px),
+            radial-gradient(circle at 30% 120%, #ff6f6f 0 10px, transparent 11px),
+            radial-gradient(circle at 55% 100%, #7fffd4 0 11px, transparent 12px),
+            radial-gradient(circle at 80% 120%, #ffd966 0 10px, transparent 11px),
+            linear-gradient(90deg, #0b3d0b 0 10%, #145214 10% 20%, #0b3d0b 20% 30%, #145214 30% 40%, #0b3d0b 40% 50%, #145214 50% 60%, #0b3d0b 60% 70%, #145214 70% 80%, #0b3d0b 80% 90%, #145214 90% 100%);
         "></div>
 
-        <div style="position:relative; z-index:1;">
-          <div style="font-size:3.2rem; margin-bottom:0.3rem;">🎄🎉</div>
-          <h1 style="
-            font-size:2.1rem;
-            margin:0 0 0.8rem;
-            letter-spacing:0.06em;
-            text-transform:uppercase;
-            text-shadow:0 3px 10px rgba(0,0,0,0.7);
-          ">
-            Vinder af Xmas Challenge
-          </h1>
+        <h1 style="font-size:2.6rem; margin:18px 0 6px; text-shadow:0 0 16px rgba(0,0,0,0.7);">
+          🎄 VINDER AF XMAS CHALLENGE 🎄
+        </h1>
 
-          <p id="winnerOverlayMessage" style="
-            font-size:1.3rem;
-            margin:0 0 0.6rem;
-          "></p>
+        <p id="winnerOverlayMessage" style="font-size:1.4rem; margin:6px 0 12px; opacity:0.9;"></p>
 
-          <p id="winnerOverlayNames" style="
-            font-size:1.9rem;
-            font-weight:900;
-            margin:0 0 0.3rem;
-          "></p>
+        <p id="winnerOverlayNames" style="
+          font-size:2.2rem;
+          font-weight:900;
+          margin:10px 0 4px;
+          color:#ffeeba;
+          text-shadow:0 0 18px rgba(0,0,0,0.9);
+        "></p>
 
-          <p style="
-            font-size:1.1rem;
-            margin:0 0 0.8rem;
-          ">
-            Score: <span id="winnerOverlayScore"></span> point
-          </p>
+        <p style="font-size:1.1rem; margin:2px 0 14px; opacity:0.9;">
+          Topscore: <span id="winnerOverlayScore"></span> point
+        </p>
 
-          <p style="
-            font-size:0.95rem;
-            opacity:0.85;
-            margin-top:0.8rem;
-          ">
-            Klik hvor som helst på skærmen for at lukke
-          </p>
-        </div>
+        <p style="font-size:0.95rem; opacity:0.8; margin:0;">
+          Klik hvor som helst for at lukke
+        </p>
+
+        <!-- falling snow overlay (simple) -->
+        <div style="
+          pointer-events:none;
+          position:absolute;
+          inset:0;
+          background-image:
+            radial-gradient(circle, rgba(255,255,255,0.9) 0 2px, transparent 3px),
+            radial-gradient(circle, rgba(255,255,255,0.8) 0 1.5px, transparent 2.5px);
+          background-size: 180px 240px, 260px 320px;
+          background-position: 0 0, 40px 60px;
+          opacity:0.18;
+          animation: winnerSnow 18s linear infinite;
+        "></div>
       </div>
+      <style>
+        @keyframes winnerSnow {
+          0% { background-position: 0 0, 40px 60px; }
+          100% { background-position: 0 700px, 40px 760px; }
+        }
+      </style>
     `;
 
     winnerOverlayEl.addEventListener("click", () => {
@@ -189,21 +188,16 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
     document.body.appendChild(winnerOverlayEl);
   }
 
-  const msgEl = winnerOverlayEl.querySelector("#winnerOverlayMessage");
-  const namesEl = winnerOverlayEl.querySelector("#winnerOverlayNames");
-  const scoreEl = winnerOverlayEl.querySelector("#winnerOverlayScore");
+  const msgEl = document.getElementById("winnerOverlayMessage");
+  const namesEl = document.getElementById("winnerOverlayNames");
+  const scoreEl = document.getElementById("winnerOverlayScore");
 
   if (msgEl) msgEl.textContent = message || "";
   if (namesEl) {
     namesEl.textContent =
       winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
   }
-  if (scoreEl) {
-    scoreEl.textContent =
-      typeof topScore === "number" && !Number.isNaN(topScore)
-        ? String(topScore)
-        : "0";
-  }
+  if (scoreEl) scoreEl.textContent = topScore ?? 0;
 
   winnerOverlayEl.style.display = "flex";
 }
@@ -221,7 +215,7 @@ const api = {
     if (buzzBtn) buzzBtn.disabled = true;
     hideGrandprixPopup();
     hideNisseGaadenAnswer();
-    stopBilledeQuiz(api);
+    stopBilledeQuiz(api); // make sure billedequiz is hidden too
   }
 };
 
@@ -355,8 +349,10 @@ function ensureNisseGaadenAnswer() {
 
     socket.emit("submitCard", { teamName: myTeamName, text });
 
+    // mark this round as answered
     ngAnsweredRoundId = window.__currentRoundId || null;
 
+    // clear + lock UI
     ngInput.value = "";
     api.showStatus("✅ Svar sendt til læreren.");
     hideNisseGaadenAnswer();
@@ -443,6 +439,7 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
+  // new round => reset lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -492,11 +489,12 @@ function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
+  // Stop all mini-games before switch
   stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
-  stopBilledeQuiz(api);
+  stopBilledeQuiz(api); // also stop billedequiz
 
   if (!ch) {
     challengeTitle.textContent = "Ingen udfordring endnu";
@@ -540,7 +538,7 @@ function renderChallenge(ch) {
   }
 
   if (ch.type === "BilledeQuiz") {
-    renderBilledeQuiz(ch, api);
+    renderBilledeQuiz(ch, api); // show picture + text
     return;
   }
 
@@ -560,6 +558,7 @@ socket.on("state", (s) => {
 
   const ch = s.currentChallenge;
 
+  // ---------- Grandprix lock-out for teams that already answered wrong ----------
   if (ch && ch.type === "Nisse Grandprix") {
     const answeredTeams = ch.answeredTeams || {};
     const normalizeName = (x) => (x || "").trim().toLowerCase();
@@ -569,6 +568,7 @@ socket.on("state", (s) => {
       (name) => normalizeName(name) === me
     );
 
+    // If this team already tried this round, BUZZ must stay disabled
     if (alreadyAnswered) {
       api.setBuzzEnabled(false);
     }
@@ -603,12 +603,12 @@ socket.on("state", (s) => {
   }
 });
 
-// Winner overlay from server
-socket.on("show-winner", (payload) => {
-  showWinnerOverlay(payload || {});
-});
-
 // When points change, show a toast on all teams
 socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
+});
+
+// Winner overlay from server (when admin ends game)
+socket.on("show-winner", (payload) => {
+  showWinnerOverlay(payload || {});
 });
