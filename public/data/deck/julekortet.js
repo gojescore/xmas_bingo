@@ -59,17 +59,32 @@ export const juleKortetDeck = [
     id: "j9",
     type: "JuleKortet",
     title: "LærerKortet - Lang nat",
-    text: "Efter en lang nat hviskede julemanden..",
+    text: "Dagen efter juleaften burde man kalde..",
     answer: "Lærerne stemmer",
   },
              {
     id: "j10",
     type: "JuleKortet",
-    title: "LærerKortet -Frosty",
-    text: "Frosty smeltede lidt, da..",
+    title: "LærerKortet - Hemmelige ønske",
+    text: "Noget julemor ville ønske, julemanden stoppede med!",
+    answer: "Lærerne stemmer",
+  },
+               {
+    id: "j11",
+    type: "JuleKortet",
+    title: "LærerKortet - Rudolf",
+    text: "Det første Rudolf googler, når julemanden falder i søvn.",
+    answer: "Lærerne stemmer",
+  },
+               {
+    id: "j12",
+    type: "JuleKortet",
+    title: "LærerKortet - Hemmelige ønske",
+    text: "Grunden til at ingen nisser vil arbejde om natten i rensdyrstalden!",
     answer: "Lærerne stemmer",
   }
 ];
+
 
 
 
