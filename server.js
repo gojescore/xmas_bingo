@@ -1,5 +1,5 @@
 // server.js
-// Xmas Challenge – main + team + minigames + point toasts
+// Xmas Challenge – main + team + minigames + point toasts + winner overlay
 
 const express = require("express");
 const http = require("http");
@@ -46,19 +46,8 @@ let state = {
   teams: [],
   deck: [],
   currentChallenge: null,
-  gameCode: null,
+  gameCode: null
 };
-
-// Helper to compare old/new team points
-function indexTeamsByKey(teams) {
-  const map = new Map();
-  for (const t of teams || []) {
-    const key = (t.id || t.name || "").toLowerCase();
-    if (key) map.set(key, t);
-    return map;
-  }
-  return map;
-}
 
 // -----------------------------------------------------
 // SOCKET.IO
@@ -94,7 +83,7 @@ io.on("connection", (socket) => {
         team = {
           id: "t" + Date.now() + Math.random(),
           name: trimmedName,
-          points: 0,
+          points: 0
         };
         state.teams.push(team);
         io.emit("state", state);
@@ -116,39 +105,20 @@ io.on("connection", (socket) => {
   socket.on("updateState", (newState) => {
     if (!newState) return;
 
-    // 1) Compute point changes for toasts
-    const oldIndex = indexTeamsByKey(state.teams);
     const newTeams = Array.isArray(newState.teams)
       ? newState.teams
       : state.teams;
 
-    for (const t of newTeams) {
-      const key = (t.id || t.name || "").toLowerCase();
-      if (!key) continue;
-
-      const old = oldIndex.get(key);
-      const oldPts = old?.points ?? 0;
-      const newPts = t.points ?? 0;
-      const delta = newPts - oldPts;
-
-      if (delta !== 0) {
-        // Broadcast toast to ALL teams and main
-        io.emit("points-toast", { teamName: t.name, delta });
-      }
-    }
-
-    // 2) Replace state with new one (keep same shape)
     state = {
       ...state,
       ...newState,
-      teams: newTeams,
+      teams: newTeams
     };
 
-    // 3) Broadcast new full state
     io.emit("state", state);
   });
 
-    // ---------------------------------------------
+  // ---------------------------------------------
   // Winner screen (admin -> all clients)
   // ---------------------------------------------
   socket.on("show-winner", (payload) => {
@@ -163,7 +133,6 @@ io.on("connection", (socket) => {
     const teamName = socket.data.teamName;
     if (!teamName) return;
 
-    // Main (admin) listens for "buzzed" and updates currentChallenge itself
     io.emit("buzzed", teamName);
   });
 
@@ -171,7 +140,6 @@ io.on("connection", (socket) => {
   // GRANDPRIX: typed answer (team -> main)
   // ---------------------------------------------
   socket.on("gp-typed-answer", (payload) => {
-    // Forward directly – main updates state and calls updateState
     io.emit("gp-typed-answer", payload);
   });
 
@@ -208,7 +176,7 @@ io.on("connection", (socket) => {
     io.emit("newPhoto", { teamName: realTeamName, filename });
   });
 
-  // (Optional backwards compatibility, if nogen stadig skulle bruge "newPhoto" direkte)
+  // (Optional backwards compatibility if anyone still uses "newPhoto" directly)
   socket.on("newPhoto", (payload) => {
     io.emit("newPhoto", payload);
   });
@@ -216,16 +184,23 @@ io.on("connection", (socket) => {
   // ---------------------------------------------
   // Voting (JuleKortet + KreaNissen)
   //  - Clients emit: socket.emit("vote", index)
-  //  - Admin/main expects "voteUpdate" med { voter, index }
+  //  - Admin/main expects "voteUpdate" with { voter, index }
   // ---------------------------------------------
   socket.on("vote", (index) => {
     const voter = socket.data.teamName || "Ukendt hold";
     io.emit("voteUpdate", { voter, index });
   });
 
-  // (Backwards compatibility hvis nogen sender voteUpdate direkte)
+  // (Backwards compatibility if someone sends voteUpdate directly)
   socket.on("voteUpdate", (payload) => {
     io.emit("voteUpdate", payload);
+  });
+
+  // ---------------------------------------------
+  // Point toasts – relay from admin to everyone
+  // ---------------------------------------------
+  socket.on("points-toast", (payload) => {
+    io.emit("points-toast", payload);
   });
 
   // ---------------------------------------------
@@ -247,4 +222,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
-
