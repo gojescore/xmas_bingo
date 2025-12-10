@@ -1,4 +1,5 @@
-// public/main.js v37 (facit line + reload deck + score toast + defensive fixes)
+// public/main.js v38
+// Facit line + reload deck + score toast + winner overlay + all minigames
 
 // =====================================================
 // SOCKET
@@ -40,7 +41,7 @@ let deck = [];
 let currentChallenge = null;
 let gameCode = null;
 
-const STORAGE_KEY = "xmasChallenge_admin_v37";
+const STORAGE_KEY = "xmasChallenge_admin_v38";
 
 // =====================================================
 // SCORE TOAST (same event as team.js)
@@ -134,36 +135,6 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
   winnerOverlayEl.style.display = "flex";
 }
 
-
-
-  const abs = Math.abs(delta);
-  const pointWord = abs === 1 ? "point" : "point";
-  const msg =
-    delta > 0
-      ? `${teamName} har fået ${abs} ${pointWord}!`
-      : `${teamName} har mistet ${abs} ${pointWord}!`;
-
-  scoreToastEl.className = "score-toast";
-
-  if (delta > 0) {
-    scoreToastEl.classList.add("score-toast--gain");
-  } else {
-    scoreToastEl.classList.add("score-toast--loss");
-  }
-
-  scoreToastEl.textContent = msg;
-
-  // restart animation
-  void scoreToastEl.offsetWidth;
-
-  scoreToastEl.classList.add("score-toast--show");
-
-  if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
-  scoreToastTimeout = setTimeout(() => {
-    scoreToastEl.classList.remove("score-toast--show");
-  }, 4000);
-}
-
 // =====================================================
 // Persistence
 // =====================================================
@@ -247,7 +218,10 @@ async function loadDeckSafely() {
     bq = m.DECK || m.billedeQuizDeck || m.deck || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({ ...c, used: !!c.used }));
+  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({
+    ...c,
+    used: !!c.used
+  }));
 
   renderDeck();
   renderTeams();
@@ -651,7 +625,7 @@ function renderMiniGameArea() {
       p.style.fontWeight = "900";
       p.textContent = winners.length
         ? `Vindere: ${winners.join(", ")}`
-        : "Ingen vinder fundt.";
+        : "Ingen vinder fundet.";
       wrap.appendChild(p);
     }
 
@@ -1007,14 +981,14 @@ endGameBtn.onclick = () => {
 
   endGameResultEl.textContent = message;
 
-  // 👇 NEW: show winner overlay locally
+  // Show winner overlay locally
   showWinnerOverlay({
     winners: winners.map((w) => w.name),
     topScore,
     message
   });
 
-  // 👇 NEW: tell server so ALL screens show the winner overlay
+  // Tell server so ALL screens show the winner overlay
   socket.emit("show-winner", {
     winners: winners.map((w) => w.name),
     topScore,
@@ -1024,7 +998,6 @@ endGameBtn.onclick = () => {
   saveLocal();
   syncToServer();
 };
-
 
 // =====================================================
 // Start game
@@ -1202,6 +1175,3 @@ renderCurrentChallenge();
 renderMiniGameArea();
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
-
-
