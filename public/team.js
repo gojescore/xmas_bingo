@@ -61,6 +61,53 @@ function showScoreToast(teamName, delta) {
     document.body.appendChild(scoreToastEl);
   }
 
+  // ---------- Winner overlay (same look as main) ----------
+let winnerOverlayEl = null;
+
+function showWinnerOverlay({ winners, topScore, message }) {
+  if (!winnerOverlayEl) {
+    winnerOverlayEl = document.createElement("div");
+    winnerOverlayEl.id = "winnerOverlay";
+    winnerOverlayEl.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      text-align: center;
+      padding: 20px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    `;
+
+    winnerOverlayEl.innerHTML = `
+      <h1 style="font-size:3rem; margin-bottom:1rem;">🎉 Vinder af Xmas Challenge 🎉</h1>
+      <p id="winnerOverlayMessage" style="font-size:1.6rem; margin-bottom:1rem;"></p>
+      <p id="winnerOverlayNames" style="font-size:2.2rem; font-weight:900; margin-bottom:1.5rem;"></p>
+      <p style="font-size:1rem; opacity:0.8;">Tryk hvor som helst for at lukke</p>
+    `;
+
+    winnerOverlayEl.addEventListener("click", () => {
+      winnerOverlayEl.style.display = "none";
+    });
+
+    document.body.appendChild(winnerOverlayEl);
+  }
+
+  const msgEl = document.getElementById("winnerOverlayMessage");
+  const namesEl = document.getElementById("winnerOverlayNames");
+
+  if (msgEl) msgEl.textContent = message || "";
+  if (namesEl) namesEl.textContent = (winners && winners.length)
+    ? winners.join(", ")
+    : "Ingen vinder fundet";
+
+  winnerOverlayEl.style.display = "flex";
+}
+
   const abs = Math.abs(delta);
   const pointWord = abs === 1 ? "point" : "point";
   const msg =
@@ -493,4 +540,9 @@ socket.on("state", (s) => {
 // When points change, show a toast on all teams
 socket.on("points-toast", ({ teamName, delta }) => {
   showScoreToast(teamName, delta);
+});
+
+// Winner overlay from server
+socket.on("show-winner", (payload) => {
+  showWinnerOverlay(payload || {});
 });
