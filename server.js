@@ -82,6 +82,15 @@ io.on("connection", (socket) => {
   socket.emit("state", state);
 
   // ---------------------------------------------
+// Winner/Voice screens (admin -> all clients)
+// ---------------------------------------------
+socket.on("send-voice", (payload) => {
+  // payload: { filename, from, createdAt, mimeType }
+  io.emit("voice-message", payload);
+});
+
+
+  // ---------------------------------------------
   // TEAMS: joinGame (code + team name)
   // ---------------------------------------------
   socket.on("joinGame", ({ code, teamName }, cb) => {
@@ -245,4 +254,5 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
+
 
