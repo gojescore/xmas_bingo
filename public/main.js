@@ -377,26 +377,53 @@ function initVoicePanel() {
 }
 
 function addVoiceOpenButtonNextToEndGame() {
-  if (!endGameBtn) return;
-
   // Avoid duplicates
   if (document.getElementById("openVoiceBtn")) return;
 
-  const btn = document.createElement("button");
-  btn.id = "openVoiceBtn";
-  btn.type = "button";
-  btn.className = endGameBtn.className || "challenge-card";
-  btn.textContent = "🎙️ Voice";
-  btn.style.marginLeft = "8px";
+  const tryInsert = () => {
+    const endBtn = document.getElementById("endGameBtn");
+    if (!endBtn) return false;
 
-  btn.onclick = () => {
-    initVoicePanel();
-    if (window.__showVoicePanel) window.__showVoicePanel();
+    const btn = document.createElement("button");
+    btn.id = "openVoiceBtn";
+    btn.type = "button";
+    btn.textContent = "🎙️ Voice";
+
+    // Use same styling as other buttons if possible
+    btn.className = endBtn.className || "challenge-card";
+
+    // Force visibility even if CSS is weird
+    btn.style.display = "inline-block";
+    btn.style.marginLeft = "8px";
+    btn.style.whiteSpace = "nowrap";
+
+    btn.onclick = () => {
+      initVoicePanel();
+      window.__showVoicePanel?.();
+    };
+
+    // SAFER placement: put it INSIDE the same parent as End Game
+    const parent = endBtn.parentElement;
+    if (parent) {
+      parent.appendChild(btn);
+      return true;
+    }
+
+    // Fallback
+    endBtn.insertAdjacentElement("afterend", btn);
+    return true;
   };
 
-  // Place next to endGameBtn
-  endGameBtn.insertAdjacentElement("afterend", btn);
+  // Try now, then retry for ~2 seconds if DOM is late
+  if (tryInsert()) return;
+
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+    if (tryInsert() || tries > 20) clearInterval(t);
+  }, 100);
 }
+
 
 // =====================================================
 // Persistence
@@ -1422,3 +1449,7 @@ initVoicePanel();
 
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
+addVoiceOpenButtonNextToEndGame();
+initVoicePanel(); // panel is hidden by default
+
