@@ -18,6 +18,29 @@ const io = new Server(server);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 
+// -----------------------------------------------------
+// VOICE MESSAGES (UPLOAD + STATIC)
+// -----------------------------------------------------
+const AUDIO_DIR = path.join(__dirname, "uploads_audio");
+
+// Ensure uploads_audio folder exists
+if (!fs.existsSync(AUDIO_DIR)) {
+  fs.mkdirSync(AUDIO_DIR, { recursive: true });
+}
+
+app.use("/uploads_audio", express.static(AUDIO_DIR));
+
+// Multer for audio uploads
+const uploadAudio = multer({ dest: AUDIO_DIR });
+
+app.post("/upload-audio", uploadAudio.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ ok: false, message: "Ingen lydfil modtaget." });
+  }
+  res.json({ ok: true, filename: req.file.filename });
+});
+
+
 // Ensure uploads folder exists (for KreaNissen photos)
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -222,3 +245,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
+
