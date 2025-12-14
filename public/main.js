@@ -1,9 +1,6 @@
 // public/main.js v39
 // Facit line + reload deck + score toast + winner overlay + all minigames + VOICE panel (admin)
 
-// =====================================================
-// SOCKET
-// =====================================================
 const socket = io();
 
 // =====================================================
@@ -28,8 +25,8 @@ const endGameResultEl = document.getElementById("endGameResult");
 const challengeGridEl = document.querySelector(".challenge-grid");
 const miniGameArea = document.getElementById("miniGameArea");
 
-// optional reload button (safe if missing)
 const reloadDeckBtn = document.getElementById("reloadDeckBtn");
+const openVoiceBtn = document.getElementById("openVoiceBtn");
 
 // =====================================================
 // STATE
@@ -44,7 +41,7 @@ let gameCode = null;
 const STORAGE_KEY = "xmasChallenge_admin_v39";
 
 // =====================================================
-// SCORE TOAST (same event as team.js)
+// SCORE TOAST
 // =====================================================
 let scoreToastEl = null;
 let scoreToastTimeout = null;
@@ -58,11 +55,10 @@ function showScoreToast(teamName, delta) {
   }
 
   const abs = Math.abs(delta);
-  const pointWord = abs === 1 ? "point" : "point";
   const msg =
     delta > 0
-      ? `${teamName} har fået ${abs} ${pointWord}!`
-      : `${teamName} har mistet ${abs} ${pointWord}!`;
+      ? `${teamName} har fået ${abs} point!`
+      : `${teamName} har mistet ${abs} point!`;
 
   scoreToastEl.className = "score-toast";
   if (delta > 0) scoreToastEl.classList.add("score-toast--gain");
@@ -70,9 +66,7 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
-  // restart animation
   void scoreToastEl.offsetWidth;
-
   scoreToastEl.classList.add("score-toast--show");
 
   if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
@@ -82,7 +76,7 @@ function showScoreToast(teamName, delta) {
 }
 
 // =====================================================
-// Winner overlay (shown on main + teams)
+// Winner overlay
 // =====================================================
 let winnerOverlayEl = null;
 
@@ -159,18 +153,11 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
             margin:0 0 0.3rem;
           "></p>
 
-          <p style="
-            font-size:1.1rem;
-            margin:0 0 0.8rem;
-          ">
+          <p style="font-size:1.1rem; margin:0 0 0.8rem;">
             Score: <span id="winnerOverlayScore"></span> point
           </p>
 
-          <p style="
-            font-size:0.95rem;
-            opacity:0.85;
-            margin-top:0.8rem;
-          ">
+          <p style="font-size:0.95rem; opacity:0.85; margin-top:0.8rem;">
             Klik hvor som helst på skærmen for at lukke
           </p>
         </div>
@@ -204,8 +191,7 @@ function showWinnerOverlay({ winners = [], topScore = 0, message = "" } = {}) {
 }
 
 // =====================================================
-// VOICE MESSAGE FEATURE (ADMIN → ALL TEAMS)
-//  - Requires server: POST /upload-audio + socket event "send-voice"
+// VOICE PANEL (admin)
 // =====================================================
 let __voicePanelEl = null;
 
@@ -261,13 +247,6 @@ function initVoicePanel() {
   window.__showVoicePanel = () => {
     panel.style.display = "block";
   };
-
-  // ESC closes the panel (admin convenience)
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && panel.style.display !== "none") {
-      panel.style.display = "none";
-    }
-  });
 
   let mediaRecorder = null;
   let audioStream = null;
@@ -376,43 +355,6 @@ function initVoicePanel() {
   };
 }
 
-function addVoiceOpenButtonNextToEndGame() {
-  if (document.getElementById("openVoiceBtn")) return;
-
-  const tryInsert = () => {
-    const endBtn = document.getElementById("endGameBtn");
-    if (!endBtn) return false;
-
-    const btn = document.createElement("button");
-    btn.id = "openVoiceBtn";
-    btn.type = "button";
-    btn.textContent = "🎙️ Voice";
-    btn.className = endBtn.className || "challenge-card";
-
-    btn.style.display = "inline-block";
-    btn.style.marginLeft = "8px";
-    btn.style.whiteSpace = "nowrap";
-
-    btn.onclick = () => {
-      initVoicePanel();
-      window.__showVoicePanel?.();
-    };
-
-    // Most reliable placement: immediately after end button
-    endBtn.insertAdjacentElement("afterend", btn);
-    return true;
-  };
-
-  if (tryInsert()) return;
-
-  // Retry briefly if DOM is late
-  let tries = 0;
-  const t = setInterval(() => {
-    tries++;
-    if (tryInsert() || tries > 30) clearInterval(t);
-  }, 100);
-}
-
 // =====================================================
 // Persistence
 // =====================================================
@@ -441,12 +383,7 @@ function loadLocal() {
 // Sync
 // =====================================================
 function syncToServer() {
-  socket.emit("updateState", {
-    teams,
-    deck,
-    currentChallenge,
-    gameCode
-  });
+  socket.emit("updateState", { teams, deck, currentChallenge, gameCode });
 }
 
 // =====================================================
@@ -496,10 +433,7 @@ async function loadDeckSafely() {
     bq = m.DECK || m.billedeQuizDeck || m.deck || [];
   } catch {}
 
-  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({
-    ...c,
-    used: !!c.used
-  }));
+  deck = [...gp, ...ng, ...jk, ...kn, ...bq].map((c) => ({ ...c, used: !!c.used }));
 
   renderDeck();
   renderTeams();
@@ -562,9 +496,9 @@ function renderDeck() {
           phase: "writing",
           writingSeconds: 120,
           writingStartAt: Date.now(),
-          cards: [], // [{ teamName, text }]
+          cards: [],
           votingCards: [],
-          votes: {}, // { voterTeamName: index }
+          votes: {},
           winners: []
         };
         startAdminWritingTimer();
@@ -574,9 +508,9 @@ function renderDeck() {
           phase: "creating",
           creatingSeconds: 180,
           creatingStartAt: Date.now(),
-          photos: [], // [{ teamName, filename }]
+          photos: [],
           votingPhotos: [],
-          votes: {}, // { voterTeamName: index }
+          votes: {},
           winners: []
         };
         startAdminCreatingTimer();
@@ -606,8 +540,7 @@ function renderDeck() {
 // =====================================================
 function renderTeams() {
   const sorted = [...teams].sort((a, b) => {
-    if ((b.points ?? 0) !== (a.points ?? 0))
-      return (b.points ?? 0) - (a.points ?? 0);
+    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
   });
 
@@ -615,8 +548,7 @@ function renderTeams() {
 
   sorted.forEach((team) => {
     const li = document.createElement("li");
-    li.className =
-      "team-item" + (team.id === selectedTeamId ? " selected" : "");
+    li.className = "team-item" + (team.id === selectedTeamId ? " selected" : "");
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "team-name";
@@ -632,11 +564,7 @@ function renderTeams() {
       const before = team.points ?? 0;
       team.points = Math.max(0, before - 1);
       const delta = team.points - before;
-
-      if (delta !== 0) {
-        socket.emit("points-toast", { teamName: team.name, delta });
-      }
-
+      if (delta !== 0) socket.emit("points-toast", { teamName: team.name, delta });
       saveLocal();
       renderTeams();
       syncToServer();
@@ -652,9 +580,7 @@ function renderTeams() {
       const before = team.points ?? 0;
       team.points = before + 1;
       const delta = team.points - before;
-
       socket.emit("points-toast", { teamName: team.name, delta });
-
       saveLocal();
       renderTeams();
       syncToServer();
@@ -688,15 +614,13 @@ function renderCurrentChallenge() {
   currentChallengeText.textContent = title;
 
   let facitText = currentChallenge.answer || "";
-
   if (!facitText) {
     if (currentChallenge.type === "Nisse Grandprix") {
       facitText = "Eleverne lytter til sangen og buzzer, når de kender svaret.";
     } else if (currentChallenge.type === "NisseGåden") {
       facitText = "Eleverne skal gætte gåden og skrive deres svar.";
     } else if (currentChallenge.type === "JuleKortet") {
-      facitText =
-        "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
+      facitText = "Eleverne skriver et julekort, som senere indgår i en anonym afstemning.";
     } else if (currentChallenge.type === "KreaNissen") {
       facitText = "Eleverne laver noget kreativt og sender et billede.";
     } else if (currentChallenge.type === "BilledeQuiz") {
@@ -704,9 +628,7 @@ function renderCurrentChallenge() {
     }
   }
 
-  if (facitLine) {
-    facitLine.textContent = facitText ? `Facit: ${facitText}` : "";
-  }
+  if (facitLine) facitLine.textContent = facitText ? `Facit: ${facitText}` : "";
 }
 
 // =====================================================
@@ -721,10 +643,10 @@ function renderMiniGameArea() {
   miniGameArea.innerHTML = "";
   if (!currentChallenge) return;
 
+  // ---------- GRANDPRIX ----------
   if (currentChallenge.type === "Nisse Grandprix") {
     const wrap = document.createElement("div");
-    wrap.style.cssText =
-      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
+    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
 
     wrap.innerHTML = `
       <h3>Nisse Grandprix</h3>
@@ -739,14 +661,13 @@ function renderMiniGameArea() {
     return;
   }
 
+  // ---------- NISSEGÅDEN ----------
   if (currentChallenge.type === "NisseGåden") {
     const wrap = document.createElement("div");
-    wrap.style.cssText =
-      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
-
+    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
     wrap.innerHTML = `<h3>NisseGåden – svar</h3>`;
-    const answers = currentChallenge.answers || [];
 
+    const answers = currentChallenge.answers || [];
     if (!answers.length) {
       const p = document.createElement("p");
       p.textContent = "Ingen svar endnu…";
@@ -768,13 +689,12 @@ function renderMiniGameArea() {
     return;
   }
 
+  // ---------- JULEKORTET ----------
   if (currentChallenge.type === "JuleKortet") {
     const ch = currentChallenge;
 
     const wrap = document.createElement("div");
-    wrap.style.cssText =
-      "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
-
+    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:10px;";
     wrap.innerHTML = `<h3>JuleKortet – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "writing") {
@@ -803,8 +723,7 @@ function renderMiniGameArea() {
 
       cards.forEach((c, i) => {
         const box = document.createElement("div");
-        box.style.cssText =
-          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Kort #${i + 1}</div>
           <div style="white-space:pre-wrap; margin:6px 0;">${c.text}</div>
@@ -824,9 +743,7 @@ function renderMiniGameArea() {
       const winners = ch.winners || [];
       const p = document.createElement("p");
       p.style.fontWeight = "900";
-      p.textContent = winners.length
-        ? `Vindere: ${winners.join(", ")}`
-        : "Ingen vinder fundet.";
+      p.textContent = winners.length ? `Vindere: ${winners.join(", ")}` : "Ingen vinder fundet.";
       wrap.appendChild(p);
     }
 
@@ -834,13 +751,12 @@ function renderMiniGameArea() {
     return;
   }
 
+  // ---------- KREANISSEN ----------
   if (currentChallenge.type === "KreaNissen") {
     const ch = currentChallenge;
 
     const wrap = document.createElement("div");
-    wrap.style.cssText =
-      "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
-
+    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #0b6; border-radius:10px;";
     wrap.innerHTML = `<h3>KreaNissen – fase: ${ch.phase}</h3>`;
 
     if (ch.phase === "creating") {
@@ -869,8 +785,7 @@ function renderMiniGameArea() {
 
       photos.forEach((p, i) => {
         const box = document.createElement("div");
-        box.style.cssText =
-          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
           <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
@@ -890,9 +805,7 @@ function renderMiniGameArea() {
       const winners = ch.winners || [];
       const p = document.createElement("p");
       p.style.fontWeight = "900";
-      p.textContent = winners.length
-        ? `Vindere: ${winners.join(", ")}`
-        : "Ingen vinder fundet.";
+      p.textContent = winners.length ? `Vindere: ${winners.join(", ")}` : "Ingen vinder fundet.";
       wrap.appendChild(p);
     }
 
@@ -900,11 +813,10 @@ function renderMiniGameArea() {
     return;
   }
 
+  // ---------- BILLEDEQUIZ ----------
   if (currentChallenge.type === "BilledeQuiz") {
     const wrap = document.createElement("div");
-    wrap.style.cssText =
-      "margin-top:10px; padding:10px; border:1px dashed #336; border-radius:10px;";
-
+    wrap.style.cssText = "margin-top:10px; padding:10px; border:1px dashed #336; border-radius:10px;";
     wrap.innerHTML = `
       <h3>Billedquiz</h3>
       <p>Holdene ser billedet på deres egne skærme.</p>
@@ -1110,22 +1022,14 @@ function startAdminGpCountdownIfLocked() {
   if (!currentChallenge.countdownStartAt) return;
 
   gpAdminTimer = setInterval(() => {
-    const elapsed = Math.floor(
-      (Date.now() - currentChallenge.countdownStartAt) / 1000
-    );
-    const left = Math.max(
-      0,
-      (currentChallenge.countdownSeconds || 20) - elapsed
-    );
+    const elapsed = Math.floor((Date.now() - currentChallenge.countdownStartAt) / 1000);
+    const left = Math.max(0, (currentChallenge.countdownSeconds || 20) - elapsed);
     const elc = document.getElementById("gpAdminCountdown");
     if (elc) elc.textContent = left;
     if (left <= 0) clearInterval(gpAdminTimer);
   }, 200);
 }
 
-// =====================================================
-// Stop GP audio everywhere
-// =====================================================
 function stopGpAudioEverywhere() {
   socket.emit("gp-stop-audio-now");
   if (currentChallenge?.type === "Nisse Grandprix") {
@@ -1188,7 +1092,6 @@ noBtn.onclick = () => {
   }
 
   currentChallenge = null;
-
   renderCurrentChallenge();
   renderMiniGameArea();
   saveLocal();
@@ -1237,8 +1140,8 @@ endGameBtn.onclick = () => {
   stopGpAudioEverywhere();
 
   const sorted = [...teams].sort((a, b) => (b.points ?? 0) - (a.points ?? 0));
-  const topScore = sorted[0].points;
-  const winners = sorted.filter((t) => t.points === topScore);
+  const topScore = sorted[0].points ?? 0;
+  const winners = sorted.filter((t) => (t.points ?? 0) === topScore);
 
   const message =
     winners.length === 1
@@ -1247,11 +1150,7 @@ endGameBtn.onclick = () => {
 
   endGameResultEl.textContent = message;
 
-  showWinnerOverlay({
-    winners: winners.map((w) => w.name),
-    topScore,
-    message
-  });
+  showWinnerOverlay({ winners: winners.map((w) => w.name), topScore, message });
 
   socket.emit("show-winner", {
     winners: winners.map((w) => w.name),
@@ -1268,7 +1167,7 @@ endGameBtn.onclick = () => {
 // =====================================================
 startGameBtn.onclick = () => {
   gameCode = String(Math.floor(1000 + Math.random() * 9000));
-  gameCodeValueEl.textContent = gameCode;
+  if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode;
 
   teams = [];
   selectedTeamId = null;
@@ -1348,13 +1247,8 @@ socket.on("newCard", (payload) => {
     currentChallenge.answers.push({ teamName, text });
   }
 
-  if (
-    currentChallenge.type === "JuleKortet" &&
-    currentChallenge.phase === "writing"
-  ) {
-    const already = currentChallenge.cards.some(
-      (c) => (c.teamName || c.team) === teamName
-    );
+  if (currentChallenge.type === "JuleKortet" && currentChallenge.phase === "writing") {
+    const already = currentChallenge.cards.some((c) => (c.teamName || c.team) === teamName);
     if (!already) currentChallenge.cards.push({ teamName, text });
   }
 
@@ -1370,9 +1264,7 @@ socket.on("newPhoto", (payload) => {
   const teamName = payload.teamName || payload.team || "Ukendt hold";
   const filename = payload.filename;
 
-  const already = currentChallenge.photos.some(
-    (p) => (p.teamName || p.team) === teamName
-  );
+  const already = currentChallenge.photos.some((p) => (p.teamName || p.team) === teamName);
   if (!already) currentChallenge.photos.push({ teamName, filename });
 
   renderMiniGameArea();
@@ -1429,11 +1321,17 @@ renderDeck();
 renderCurrentChallenge();
 renderMiniGameArea();
 
-await loadDeckSafely();
-if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
-// Create the panel (hidden by default; open via 🎙️ Voice button)
 initVoicePanel();
 
-// Add the Voice button next to "Afslut spil"
-addVoiceOpenButtonNextToEndGame();
+// Button is in HTML, always visible
+if (openVoiceBtn) {
+  openVoiceBtn.onclick = () => {
+    initVoicePanel();
+    window.__showVoicePanel?.();
+    const p = document.getElementById("voicePanel");
+    if (p) p.style.display = "block";
+  };
+}
+
+await loadDeckSafely();
+if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
