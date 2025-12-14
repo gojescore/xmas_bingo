@@ -614,7 +614,9 @@ socket.on("show-winner", (payload) => {
 });
 
 // =====================================================
-// VOICE MESSAGE FEATURE (NEW – SAFE ADDITION)
+// VOICE MESSAGE FEATURE (Corrected to match server.js/main.js)
+// Server emits: "send-voice"
+// Static path: "/uploads-audio/<filename>"
 // =====================================================
 let voiceOverlayEl = null;
 
@@ -667,9 +669,9 @@ function showVoiceOverlay({ filename, from, createdAt } = {}) {
     document.body.appendChild(voiceOverlayEl);
 
     voiceOverlayEl.querySelector("#voClose").onclick = () => {
-      voiceOverlayEl.style.display = "none";
       const a = voiceOverlayEl.querySelector("#voAudio");
       try { a.pause(); } catch {}
+      voiceOverlayEl.style.display = "none";
     };
 
     voiceOverlayEl.querySelector("#voPlay").onclick = async () => {
@@ -682,16 +684,16 @@ function showVoiceOverlay({ filename, from, createdAt } = {}) {
   const audio = voiceOverlayEl.querySelector("#voAudio");
 
   const timeText = createdAt ? new Date(createdAt).toLocaleTimeString() : "";
-  meta.textContent = `${from || "Lærer"} ${timeText ? "· " + timeText : ""}`;
+  meta.textContent = `${from || "Lærer"}${timeText ? " · " + timeText : ""}`;
 
-  // cache-bust so it loads immediately
-  audio.src = `/uploads_audio/${filename}?v=${Date.now()}`;
+  // IMPORTANT: correct static route + cache-bust
+  audio.src = `/uploads-audio/${filename}?v=${Date.now()}`;
   audio.load();
 
   voiceOverlayEl.style.display = "flex";
 }
 
-// Listen for voice messages
-socket.on("voice-message", (payload) => {
+// Listen for voice messages (matches server.js + main.js)
+socket.on("send-voice", (payload) => {
   showVoiceOverlay(payload || {});
 });
