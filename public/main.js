@@ -26,7 +26,6 @@ const challengeGridEl = document.querySelector(".challenge-grid");
 const miniGameArea = document.getElementById("miniGameArea");
 
 const reloadDeckBtn = document.getElementById("reloadDeckBtn");
-const openVoiceBtn = document.getElementById("openVoiceBtn");
 
 // =====================================================
 // STATE
@@ -353,6 +352,39 @@ function initVoicePanel() {
       stopBtn.disabled = true;
     }
   };
+}
+
+// =====================================================
+// VOICE BUTTON (inject next to "Afslut spil")
+// =====================================================
+function ensureVoiceButtonNextToEndGame() {
+  if (document.getElementById("openVoiceBtn")) return;
+
+  const endBtn = document.getElementById("endGameBtn");
+  if (!endBtn) return;
+
+  const btn = document.createElement("button");
+  btn.id = "openVoiceBtn";
+  btn.type = "button";
+  btn.textContent = "🎙️ Voice";
+
+  // Try to match styling
+  btn.className = endBtn.className || "end-game";
+  btn.style.marginLeft = "10px";
+  btn.style.whiteSpace = "nowrap";
+  btn.style.display = "inline-block";
+
+  btn.onclick = () => {
+    initVoicePanel();
+    window.__showVoicePanel?.();
+    const p = document.getElementById("voicePanel");
+    if (p) p.style.display = "block";
+  };
+
+  // Put it right next to end game in same container
+  const parent = endBtn.parentElement;
+  if (parent) parent.appendChild(btn);
+  else endBtn.insertAdjacentElement("afterend", btn);
 }
 
 // =====================================================
@@ -723,7 +755,8 @@ function renderMiniGameArea() {
 
       cards.forEach((c, i) => {
         const box = document.createElement("div");
-        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText =
+          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Kort #${i + 1}</div>
           <div style="white-space:pre-wrap; margin:6px 0;">${c.text}</div>
@@ -785,7 +818,8 @@ function renderMiniGameArea() {
 
       photos.forEach((p, i) => {
         const box = document.createElement("div");
-        box.style.cssText = "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
+        box.style.cssText =
+          "padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; margin-bottom:6px;";
         box.innerHTML = `
           <div style="font-weight:800;">Billede #${i + 1}</div>
           <img src="/uploads/${p.filename}" style="max-width:100%; border-radius:8px; margin:6px 0;" />
@@ -1322,16 +1356,7 @@ renderCurrentChallenge();
 renderMiniGameArea();
 
 initVoicePanel();
-
-// Button is in HTML, always visible
-if (openVoiceBtn) {
-  openVoiceBtn.onclick = () => {
-    initVoicePanel();
-    window.__showVoicePanel?.();
-    const p = document.getElementById("voicePanel");
-    if (p) p.style.display = "block";
-  };
-}
+ensureVoiceButtonNextToEndGame();
 
 await loadDeckSafely();
 if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
