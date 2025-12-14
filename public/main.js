@@ -377,7 +377,6 @@ function initVoicePanel() {
 }
 
 function addVoiceOpenButtonNextToEndGame() {
-  // Avoid duplicates
   if (document.getElementById("openVoiceBtn")) return;
 
   const tryInsert = () => {
@@ -388,11 +387,8 @@ function addVoiceOpenButtonNextToEndGame() {
     btn.id = "openVoiceBtn";
     btn.type = "button";
     btn.textContent = "🎙️ Voice";
-
-    // Use same styling as other buttons if possible
     btn.className = endBtn.className || "challenge-card";
 
-    // Force visibility even if CSS is weird
     btn.style.display = "inline-block";
     btn.style.marginLeft = "8px";
     btn.style.whiteSpace = "nowrap";
@@ -402,28 +398,20 @@ function addVoiceOpenButtonNextToEndGame() {
       window.__showVoicePanel?.();
     };
 
-    // SAFER placement: put it INSIDE the same parent as End Game
-    const parent = endBtn.parentElement;
-    if (parent) {
-      parent.appendChild(btn);
-      return true;
-    }
-
-    // Fallback
+    // Most reliable placement: immediately after end button
     endBtn.insertAdjacentElement("afterend", btn);
     return true;
   };
 
-  // Try now, then retry for ~2 seconds if DOM is late
   if (tryInsert()) return;
 
+  // Retry briefly if DOM is late
   let tries = 0;
   const t = setInterval(() => {
     tries++;
-    if (tryInsert() || tries > 20) clearInterval(t);
+    if (tryInsert() || tries > 30) clearInterval(t);
   }, 100);
 }
-
 
 // =====================================================
 // Persistence
@@ -1441,15 +1429,11 @@ renderDeck();
 renderCurrentChallenge();
 renderMiniGameArea();
 
-// Add the Voice button next to "Afslut spil" (safe DOM addition)
-addVoiceOpenButtonNextToEndGame();
+await loadDeckSafely();
+if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
 
 // Create the panel (hidden by default; open via 🎙️ Voice button)
 initVoicePanel();
 
-await loadDeckSafely();
-if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
-
+// Add the Voice button next to "Afslut spil"
 addVoiceOpenButtonNextToEndGame();
-initVoicePanel(); // panel is hidden by default
-
