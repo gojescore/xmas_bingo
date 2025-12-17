@@ -75,7 +75,7 @@ export const nisseGaaden = [
     id: "ng10",
     type: "NisseGåden",
     title: "NG - Hvilket tal?",
-    text: "Hvilket tal gik over scenen til morgensamlingen?",
+    text: "Hvilket tal sad Tina med til morgensamlingen?",
     answer: "4",
     used: false
   },
@@ -97,6 +97,7 @@ export const nisseGaaden = [
   }
 
 ];
+
 
 
 
