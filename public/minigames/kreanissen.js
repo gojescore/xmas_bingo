@@ -1,19 +1,25 @@
-// public/minigames/kreanissen.js v3
+// public/minigames/kreanissen.js v6
+// Restores camera capture (take picture) + keeps state-driven voting (fix for disappearing images).
 // Fixes:
-// - Voting renders IMMEDIATELY from ch.votingPhotos on ALL clients (no dependency on votes/events)
-// - Stable image URLs (no Date.now() cache-busting loop)
-// - After upload: replaces UI with "Dit billede er sendt" confirmation
-// - Keeps popup open and consistent across phase changes
+// - Creating phase: camera preview + "Tag billede" + "Send billede" (uploads captured photo)
+// - Fallback: file upload if camera not available
+// - After send: UI replaced by "Dit billede er sendt. Vent på læreren…"
+// - Voting renders immediately from ch.votingPhotos on ALL clients (no dependency on votes)
 // API: renderKreaNissen(ch, api, socket, myTeamName) + stopKreaNissen(api)
 
 let popupEl = null;
 
-// Per-round flags
+// per-round flags
 let lastRoundId = null;
 let hasSubmitted = false;
 let hasVoted = false;
 
-// Avoid re-upload spam
+// camera state
+let stream = null;
+let videoEl = null;
+let canvasEl = null;
+let capturedBlob = null;
+let capturedUrl = null;
 let uploading = false;
 
 function ensurePopup() {
@@ -28,7 +34,7 @@ function ensurePopup() {
 
   popupEl.innerHTML = `
     <div style="
-      width:min(860px, 96vw);
+      width:min(920px, 96vw);
       background:#fff7ef;
       border:8px solid #0b6;
       border-radius:18px;
@@ -37,16 +43,23 @@ function ensurePopup() {
       font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     ">
       <h2 style="margin:0 0 6px; font-size:2rem;">🎨 KreaNissen</h2>
-      <p id="knPrompt" style="margin:0 0 12px; font-weight:800;"></p>
-
+      <p id="knPrompt" style="margin:0 0 12px; font-weight:900;"></p>
       <div id="knBody"></div>
-
       <p id="knStatus" style="margin-top:12px; font-weight:900;"></p>
     </div>
   `;
 
   document.body.appendChild(popupEl);
   return popupEl;
+}
+
+function setStatus(text) {
+  const statusEl = popupEl?.querySelector("#knStatus");
+  if (statusEl) statusEl.textContent = text || "";
+}
+
+function normalize(s) {
+  return (s || "").trim().toLowerCase();
 }
 
 function resetPerRoundIfNeeded(roundId) {
@@ -56,158 +69,419 @@ function resetPerRoundIfNeeded(roundId) {
     hasSubmitted = false;
     hasVoted = false;
     uploading = false;
+    capturedBlob = null;
+    if (capturedUrl) {
+      try { URL.revokeObjectURL(capturedUrl); } catch {}
+      capturedUrl = null;
+    }
   }
 }
 
-function setStatus(text) {
-  const statusEl = popupEl?.querySelector("#knStatus");
-  if (statusEl) statusEl.textContent = text || "";
+async function stopCamera() {
+  if (stream) {
+    try {
+      stream.getTracks().forEach((t) => {
+        try { t.stop(); } catch {}
+      });
+    } catch {}
+  }
+  stream = null;
+  videoEl = null;
+  canvasEl = null;
 }
 
-function stableImgSrc(filename, seed) {
-  // Stable seed per phase switch so caches behave, but doesn't thrash every render.
-  // Using phaseStartAt is good: changes when phase changes, not on every UI refresh.
-  const v = typeof seed === "number" ? seed : 1;
-  return `/uploads/${filename}?v=${v}`;
+async function ensureCamera(preferBackCamera = true) {
+  // If already running, keep it
+  if (stream && videoEl) return true;
+
+  if (!navigator.mediaDevices?.getUserMedia) return false;
+
+  // Some devices need explicit constraints to get back camera
+  const constraints = {
+    video: preferBackCamera
+      ? { facingMode: { ideal: "environment" } }
+      : { facingMode: { ideal: "user" } },
+    audio: false
+  };
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    return true;
+  } catch (err) {
+    // fallback: try any camera
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      return true;
+    } catch {
+      stream = null;
+      return false;
+    }
+  }
 }
 
-async function uploadPhotoFile(file) {
+function dataUrlFromCanvas(canvas) {
+  try {
+    return canvas.toDataURL("image/jpeg", 0.9);
+  } catch {
+    return null;
+  }
+}
+
+function blobFromCanvas(canvas) {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob(
+        (blob) => resolve(blob || null),
+        "image/jpeg",
+        0.9
+      );
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function uploadPhotoBlob(blob) {
   const fd = new FormData();
-  fd.append("file", file, file.name || "photo.jpg");
+  fd.append("file", blob, "krea.jpg");
 
   const res = await fetch("/upload", { method: "POST", body: fd });
   if (!res.ok) throw new Error("upload failed");
 
   const json = await res.json();
   if (!json?.filename) throw new Error("no filename");
-
   return json.filename;
 }
 
-function renderCreating(ch, api, socket, myTeamName) {
+function stableImgSrc(filename, seed) {
+  // Stable per-phase seed (does not change every re-render)
+  const v = typeof seed === "number" ? seed : 1;
+  return `/uploads/${filename}?v=${v}`;
+}
+
+function renderSubmittedConfirmation(api) {
   const body = popupEl.querySelector("#knBody");
   if (!body) return;
 
   body.innerHTML = "";
+  const done = document.createElement("div");
+  done.style.cssText = `
+    padding:14px;
+    border-radius:14px;
+    background:#eafff1;
+    border:2px solid #0b6;
+    font-weight:900;
+    font-size:1.35rem;
+    text-align:center;
+  `;
+  done.textContent = "✅ Dit billede er sendt. Vent på læreren…";
+  body.appendChild(done);
+
+  api?.showStatus?.("Vent på læreren…");
+  setStatus("");
+}
+
+async function renderCreating(ch, api, socket, myTeamName) {
+  const body = popupEl.querySelector("#knBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+
+  if (hasSubmitted) {
+    renderSubmittedConfirmation(api);
+    return;
+  }
 
   const wrap = document.createElement("div");
   wrap.style.cssText = "display:flex; flex-direction:column; gap:12px;";
 
   const info = document.createElement("div");
   info.style.cssText = "font-weight:900; font-size:1.1rem;";
-  info.textContent = "Upload et billede af jeres krea-ting.";
-
+  info.textContent = "Tag et billede af jeres krea-ting og send det.";
   wrap.appendChild(info);
 
-  // If already submitted: show confirmation message only (no more typing/upload UI)
-  if (hasSubmitted) {
-    const done = document.createElement("div");
-    done.style.cssText = `
-      padding:14px;
-      border-radius:14px;
-      background:#eafff1;
-      border:2px solid #0b6;
-      font-weight:900;
-      font-size:1.35rem;
-      text-align:center;
-    `;
-    done.textContent = "✅ Dit billede er sendt. Vent på læreren…";
-    wrap.appendChild(done);
+  const controlsRow = document.createElement("div");
+  controlsRow.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
 
-    body.appendChild(wrap);
-    api?.showStatus?.("Vent på læreren…");
+  const startCamBtn = document.createElement("button");
+  startCamBtn.type = "button";
+  startCamBtn.textContent = "Start kamera";
+  startCamBtn.style.cssText = `
+    font-size:1.15rem; font-weight:900; padding:10px 12px;
+    border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
+  `;
+
+  const flipBtn = document.createElement("button");
+  flipBtn.type = "button";
+  flipBtn.textContent = "Skift kamera";
+  flipBtn.style.cssText = `
+    font-size:1.15rem; font-weight:900; padding:10px 12px;
+    border-radius:12px; border:2px solid #0b6; background:#fff; color:#0b6; cursor:pointer;
+  `;
+  flipBtn.disabled = true;
+
+  const captureBtn = document.createElement("button");
+  captureBtn.type = "button";
+  captureBtn.textContent = "Tag billede";
+  captureBtn.style.cssText = `
+    font-size:1.15rem; font-weight:900; padding:10px 12px;
+    border-radius:12px; border:none; background:#1a7f37; color:#fff; cursor:pointer;
+  `;
+  captureBtn.disabled = true;
+
+  const sendBtn = document.createElement("button");
+  sendBtn.type = "button";
+  sendBtn.textContent = "Send billede";
+  sendBtn.style.cssText = `
+    font-size:1.15rem; font-weight:900; padding:10px 12px;
+    border-radius:12px; border:none; background:#d11; color:#fff; cursor:pointer;
+  `;
+  sendBtn.disabled = true;
+
+  controlsRow.append(startCamBtn, flipBtn, captureBtn, sendBtn);
+  wrap.appendChild(controlsRow);
+
+  const previewArea = document.createElement("div");
+  previewArea.style.cssText = `
+    display:grid;
+    grid-template-columns: 1fr;
+    gap:10px;
+  `;
+
+  // Video preview container
+  const videoWrap = document.createElement("div");
+  videoWrap.style.cssText = `
+    background:#000;
+    border-radius:14px;
+    overflow:hidden;
+    border:2px solid #ddd;
+  `;
+
+  videoEl = document.createElement("video");
+  videoEl.playsInline = true;
+  videoEl.autoplay = true;
+  videoEl.muted = true;
+  videoEl.style.cssText = "width:100%; height:auto; display:block; max-height:420px;";
+  videoWrap.appendChild(videoEl);
+
+  // Captured image preview
+  const imgPreview = document.createElement("img");
+  imgPreview.alt = "Forhåndsvisning";
+  imgPreview.style.cssText = `
+    width:100%;
+    height:auto;
+    max-height:420px;
+    object-fit:contain;
+    border-radius:14px;
+    border:2px solid #ddd;
+    display:none;
+    background:#fff;
+  `;
+
+  previewArea.appendChild(videoWrap);
+  previewArea.appendChild(imgPreview);
+  wrap.appendChild(previewArea);
+
+  // Fallback upload (important for devices without camera / permission denied)
+  const fallbackWrap = document.createElement("div");
+  fallbackWrap.style.cssText = `
+    margin-top:6px;
+    padding-top:10px;
+    border-top:1px dashed #bbb;
+  `;
+  fallbackWrap.innerHTML = `<div style="font-weight:900; margin-bottom:6px;">Hvis kamera ikke virker: upload et billede</div>`;
+
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.style.cssText = "font-size:1.05rem;";
+
+  fallbackWrap.appendChild(fileInput);
+  wrap.appendChild(fallbackWrap);
+
+  body.appendChild(wrap);
+
+  // ---- handlers ----
+  let usingBackCamera = true;
+
+  async function startCamera(preferBack) {
     setStatus("");
-    return;
-  }
-
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.style.cssText = "font-size:1.1rem;";
-
-  const preview = document.createElement("img");
-  preview.style.cssText = "max-width:100%; max-height:320px; border-radius:12px; display:none; border:2px solid #ddd;";
-
-  let selectedFile = null;
-
-  input.onchange = () => {
-    const f = input.files?.[0] || null;
-    selectedFile = f;
-
-    if (!f) {
-      preview.style.display = "none";
-      preview.src = "";
+    const ok = await ensureCamera(preferBack);
+    if (!ok) {
+      setStatus("⚠️ Kamera kunne ikke startes (tilladelse?). Brug upload i stedet.");
+      startCamBtn.disabled = true; // avoid spamming
       return;
     }
 
-    const url = URL.createObjectURL(f);
-    preview.src = url;
-    preview.style.display = "block";
-    setStatus("");
+    try {
+      videoEl.srcObject = stream;
+      await videoEl.play().catch(() => {});
+      captureBtn.disabled = false;
+      flipBtn.disabled = false;
+      startCamBtn.disabled = true;
+      setStatus("");
+    } catch {
+      setStatus("⚠️ Kamera-preview kunne ikke starte. Brug upload i stedet.");
+    }
+  }
+
+  startCamBtn.onclick = () => startCamera(true);
+
+  flipBtn.onclick = async () => {
+    usingBackCamera = !usingBackCamera;
+    captureBtn.disabled = true;
+    flipBtn.disabled = true;
+    startCamBtn.disabled = true;
+    setStatus("⏳ Skifter kamera…");
+
+    await stopCamera();
+
+    const ok = await ensureCamera(usingBackCamera);
+    if (!ok) {
+      setStatus("⚠️ Kunne ikke skifte kamera. Brug upload i stedet.");
+      startCamBtn.disabled = false;
+      return;
+    }
+
+    try {
+      videoEl.srcObject = stream;
+      await videoEl.play().catch(() => {});
+      captureBtn.disabled = false;
+      flipBtn.disabled = false;
+      setStatus("");
+    } catch {
+      setStatus("⚠️ Kamera-preview kunne ikke starte. Brug upload i stedet.");
+      startCamBtn.disabled = false;
+    }
   };
 
-  const sendBtn = document.createElement("button");
-  sendBtn.textContent = "Send billede";
-  sendBtn.style.cssText = `
-    font-size:1.35rem; font-weight:900; padding:12px 14px;
-    border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
-    width:fit-content;
-  `;
+  captureBtn.onclick = async () => {
+    if (!videoEl) return;
+
+    // create canvas if missing
+    if (!canvasEl) canvasEl = document.createElement("canvas");
+
+    const w = videoEl.videoWidth || 1280;
+    const h = videoEl.videoHeight || 720;
+
+    canvasEl.width = w;
+    canvasEl.height = h;
+
+    const ctx = canvasEl.getContext("2d");
+    if (!ctx) {
+      setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
+      return;
+    }
+
+    try {
+      ctx.drawImage(videoEl, 0, 0, w, h);
+    } catch {
+      setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
+      return;
+    }
+
+    const blob = await blobFromCanvas(canvasEl);
+    if (!blob) {
+      // last resort, dataURL
+      const dataUrl = dataUrlFromCanvas(canvasEl);
+      if (!dataUrl) {
+        setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
+        return;
+      }
+      // convert dataURL to blob
+      try {
+        const r = await fetch(dataUrl);
+        capturedBlob = await r.blob();
+      } catch {
+        setStatus("⚠️ Kunne ikke tage billede. Brug upload i stedet.");
+        return;
+      }
+    } else {
+      capturedBlob = blob;
+    }
+
+    if (capturedUrl) {
+      try { URL.revokeObjectURL(capturedUrl); } catch {}
+      capturedUrl = null;
+    }
+    capturedUrl = URL.createObjectURL(capturedBlob);
+
+    imgPreview.src = capturedUrl;
+    imgPreview.style.display = "block";
+
+    sendBtn.disabled = false;
+    setStatus("✅ Billede taget. Tryk “Send billede”.");
+  };
 
   sendBtn.onclick = async () => {
     if (uploading) return;
-    if (!selectedFile) {
-      setStatus("Vælg et billede først.");
+    if (!capturedBlob) {
+      setStatus("Tag et billede først (eller upload en fil).");
       return;
     }
 
     uploading = true;
     sendBtn.disabled = true;
-    input.disabled = true;
+    captureBtn.disabled = true;
+    flipBtn.disabled = true;
+    fileInput.disabled = true;
     setStatus("⏳ Uploader…");
 
     try {
-      const filename = await uploadPhotoFile(selectedFile);
+      const filename = await uploadPhotoBlob(capturedBlob);
 
-      socket.emit("submitPhoto", {
-        teamName: myTeamName,
-        filename
-      });
+      socket.emit("submitPhoto", { teamName: myTeamName, filename });
 
       hasSubmitted = true;
-
-      // Replace the UI with a clear confirmation
-      body.innerHTML = "";
-      const done = document.createElement("div");
-      done.style.cssText = `
-        padding:14px;
-        border-radius:14px;
-        background:#eafff1;
-        border:2px solid #0b6;
-        font-weight:900;
-        font-size:1.35rem;
-        text-align:center;
-      `;
-      done.textContent = "✅ Dit billede er sendt. Vent på læreren…";
-      body.appendChild(done);
-
-      api?.showStatus?.("Vent på læreren…");
-      setStatus("");
+      await stopCamera();
+      renderSubmittedConfirmation(api);
     } catch (err) {
       console.error(err);
       setStatus("⚠️ Upload fejlede. Prøv igen.");
       sendBtn.disabled = false;
-      input.disabled = false;
+      captureBtn.disabled = false;
+      flipBtn.disabled = false;
+      fileInput.disabled = false;
     } finally {
       uploading = false;
     }
   };
 
-  wrap.appendChild(input);
-  wrap.appendChild(preview);
-  wrap.appendChild(sendBtn);
+  fileInput.onchange = async () => {
+    if (uploading) return;
+    const f = fileInput.files?.[0] || null;
+    if (!f) return;
 
-  body.appendChild(wrap);
+    uploading = true;
+    fileInput.disabled = true;
+    setStatus("⏳ Uploader…");
+
+    try {
+      // stop camera if running (avoid confusion)
+      await stopCamera();
+
+      const filename = await (async () => {
+        const fd = new FormData();
+        fd.append("file", f, f.name || "photo.jpg");
+        const res = await fetch("/upload", { method: "POST", body: fd });
+        if (!res.ok) throw new Error("upload failed");
+        const json = await res.json();
+        if (!json?.filename) throw new Error("no filename");
+        return json.filename;
+      })();
+
+      socket.emit("submitPhoto", { teamName: myTeamName, filename });
+
+      hasSubmitted = true;
+      renderSubmittedConfirmation(api);
+    } catch (err) {
+      console.error(err);
+      setStatus("⚠️ Upload fejlede. Prøv igen.");
+      fileInput.disabled = false;
+    } finally {
+      uploading = false;
+    }
+  };
 }
 
 function renderVoting(ch, api, socket, myTeamName) {
@@ -216,7 +490,7 @@ function renderVoting(ch, api, socket, myTeamName) {
 
   body.innerHTML = "";
 
-  // IMPORTANT: render directly from server state
+  // Render ONLY from server state (this is what fixes the “images appear after someone votes” bug)
   const photos = Array.isArray(ch.votingPhotos) ? ch.votingPhotos : [];
 
   if (!photos.length) {
@@ -229,12 +503,12 @@ function renderVoting(ch, api, socket, myTeamName) {
     return;
   }
 
-  const statusTop = document.createElement("div");
-  statusTop.style.cssText = "font-weight:900; font-size:1.2rem; margin-bottom:10px;";
-  statusTop.textContent = hasVoted
+  const top = document.createElement("div");
+  top.style.cssText = "font-weight:900; font-size:1.2rem; margin-bottom:10px;";
+  top.textContent = hasVoted
     ? "✅ Din stemme er afgivet!"
     : "Afstemning i gang! Vælg jeres favoritbillede.";
-  body.appendChild(statusTop);
+  body.appendChild(top);
 
   const grid = document.createElement("div");
   grid.style.cssText = `
@@ -242,10 +516,7 @@ function renderVoting(ch, api, socket, myTeamName) {
     grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
   `;
 
-  const normalize = (x) => (x || "").trim().toLowerCase();
   const me = normalize(myTeamName);
-
-  // Use phaseStartAt as stable cache-bust seed for the voting phase
   const seed = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : 1;
 
   photos.forEach((p, i) => {
@@ -282,7 +553,6 @@ function renderVoting(ch, api, socket, myTeamName) {
 
       api?.showStatus?.("✅ Din stemme er afgivet!");
       setStatus("✅ Tak for din stemme!");
-      // Disable all choices immediately for this client
       [...grid.querySelectorAll("button")].forEach((b) => (b.disabled = true));
     };
 
@@ -291,7 +561,6 @@ function renderVoting(ch, api, socket, myTeamName) {
 
   body.appendChild(grid);
 
-  // During voting we don't want "vent på læreren…" as status; it can confuse.
   api?.showStatus?.("");
   setStatus("");
 }
@@ -320,11 +589,10 @@ function renderEnded(ch, api) {
 
   body.appendChild(done);
 
-  // This matches your “after minigame ends: vent på læreren…”
+  // After minigame ends, show the global "vent på læreren…" like your other games
   api?.showStatus?.("Vent på læreren…");
   setStatus("");
 
-  // Keep visible briefly, then hide
   setTimeout(() => {
     if (popupEl) popupEl.style.display = "none";
   }, 4500);
@@ -336,10 +604,20 @@ export function stopKreaNissen(api) {
   hasSubmitted = false;
   hasVoted = false;
 
+  if (capturedUrl) {
+    try { URL.revokeObjectURL(capturedUrl); } catch {}
+    capturedUrl = null;
+  }
+  capturedBlob = null;
+
+  // stop camera stream safely
+  stopCamera();
+
   if (popupEl) popupEl.remove();
   popupEl = null;
 
   api?.showStatus?.("");
+  setStatus("");
 }
 
 export function renderKreaNissen(ch, api, socket, myTeamName) {
@@ -350,31 +628,34 @@ export function renderKreaNissen(ch, api, socket, myTeamName) {
 
   const promptEl = popup.querySelector("#knPrompt");
   if (promptEl) {
-    promptEl.textContent = ch.text || "Lav noget kreativt og upload et billede.";
+    promptEl.textContent = ch.text || "Lav noget kreativt og tag et billede.";
   }
 
-  // Reset flags when new challenge round starts
   resetPerRoundIfNeeded(ch.id);
 
-  // Phase routing (purely state-driven)
+  // phase routing
   if (ch.phase === "creating") {
+    // ensure any ended/voting state does not keep camera stopped incorrectly
     renderCreating(ch, api, socket, myTeamName);
     return;
   }
 
+  // once voting begins, allow voting even if submitted
   if (ch.phase === "voting") {
-    // When voting begins, users should be able to vote even if they submitted earlier
-    // (hasVoted is separate; hasSubmitted stays true but does not block voting)
+    // we never want the camera running during voting
+    stopCamera();
     renderVoting(ch, api, socket, myTeamName);
     return;
   }
 
   if (ch.phase === "ended") {
+    stopCamera();
     renderEnded(ch, api);
     return;
   }
 
-  // Unknown phase: be safe
+  // fallback
+  stopCamera();
   api?.showStatus?.("Vent på læreren…");
   setStatus("");
 }
