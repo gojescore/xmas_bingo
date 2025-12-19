@@ -1,8 +1,9 @@
-// public/team.js v42
-// Only change from v41: BUZZ must NOT try to restart audio.
-// Audio is controlled by grandprix.js and MUST remain paused while locked.
+// public/team.js v42 (option1-compatible)
+// Fix: Grandprix popup countdown uses server-authoritative fields (phaseStartAt/phaseDurationSec + serverNow offset).
+// Keeps: winner overlay, score toast, all minigames, voice overlay aligned to server ("send-voice").
 
-import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=5";
+// Mini-games
+import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=4";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
@@ -38,6 +39,9 @@ let joined = false;
 let joinedCode = null;
 let myTeamName = null;
 
+// Option 1: server clock offset (serverNow - Date.now())
+let serverOffsetMs = 0;
+
 // Local Grandprix "I buzzed!" fallback
 let lastBuzzRoundId = null;
 let lastBuzzAt = 0;
@@ -48,6 +52,24 @@ let gpSentThisRound = false;
 
 // NisseGåden: remember if we already answered this riddle round
 let ngAnsweredRoundId = null;
+
+// ---------- Time helpers (visual only) ----------
+function updateServerOffset(serverNow) {
+  if (typeof serverNow === "number") {
+    serverOffsetMs = serverNow - Date.now();
+  }
+}
+function nowMs() {
+  return Date.now() + serverOffsetMs;
+}
+function secondsLeftFromPhase(ch) {
+  if (!ch) return null;
+  const start = ch.phaseStartAt;
+  const dur = ch.phaseDurationSec;
+  if (typeof start !== "number" || typeof dur !== "number") return null;
+  const elapsed = Math.floor((nowMs() - start) / 1000);
+  return Math.max(0, dur - elapsed);
+}
 
 // ---------- SCORE TOAST (all teams see point changes) ----------
 let scoreToastEl = null;
@@ -62,11 +84,10 @@ function showScoreToast(teamName, delta) {
   }
 
   const abs = Math.abs(delta);
-  const pointWord = abs === 1 ? "point" : "point";
   const msg =
     delta > 0
-      ? `${teamName} har fået ${abs} ${pointWord}!`
-      : `${teamName} har mistet ${abs} ${pointWord}!`;
+      ? `${teamName} har fået ${abs} point!`
+      : `${teamName} har mistet ${abs} point!`;
 
   scoreToastEl.className = "score-toast";
   if (delta > 0) scoreToastEl.classList.add("score-toast--gain");
@@ -74,6 +95,7 @@ function showScoreToast(teamName, delta) {
 
   scoreToastEl.textContent = msg;
 
+  // restart animation
   void scoreToastEl.offsetWidth;
   scoreToastEl.classList.add("score-toast--show");
 
@@ -185,10 +207,7 @@ function showWinnerOverlay(payload = {}) {
   const scoreEl = document.getElementById("winnerOverlayScore");
 
   if (msgEl) msgEl.textContent = message || "";
-  if (namesEl) {
-    namesEl.textContent =
-      winners && winners.length ? winners.join(", ") : "Ingen vinder fundet";
-  }
+  if (namesEl) namesEl.textContent = winners?.length ? winners.join(", ") : "Ingen vinder fundet";
   if (scoreEl) scoreEl.textContent = topScore ?? 0;
 
   winnerOverlayEl.style.display = "flex";
@@ -220,16 +239,16 @@ codeInput?.addEventListener("keydown", (e) => {
 });
 
 function tryCode() {
-  const code = codeInput.value.trim();
+  const code = (codeInput?.value || "").trim();
   if (!code) {
-    joinMsg.textContent = "Skriv en kode først.";
+    if (joinMsg) joinMsg.textContent = "Skriv en kode først.";
     return;
   }
   joinedCode = code;
-  codeDisplay.textContent = code;
-  joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
-  nameRow.style.display = "flex";
-  nameInput.focus();
+  if (codeDisplay) codeDisplay.textContent = code;
+  if (joinMsg) joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
+  if (nameRow) nameRow.style.display = "flex";
+  nameInput?.focus();
 }
 
 // ===========================
@@ -241,15 +260,15 @@ nameInput?.addEventListener("keydown", (e) => {
 });
 
 function tryJoin() {
-  const name = nameInput.value.trim();
+  const name = (nameInput?.value || "").trim();
   if (!name) {
-    joinMsg.textContent = "Skriv et teamnavn.";
+    if (joinMsg) joinMsg.textContent = "Skriv et teamnavn.";
     return;
   }
 
   socket.emit("joinGame", { code: joinedCode, teamName: name }, (res) => {
     if (!res?.ok) {
-      joinMsg.textContent = res?.message || "Kunne ikke joine.";
+      if (joinMsg) joinMsg.textContent = res?.message || "Kunne ikke joine.";
       return;
     }
 
@@ -257,7 +276,7 @@ function tryJoin() {
     myTeamName = res.team.name;
 
     if (teamNameLabel) teamNameLabel.textContent = myTeamName;
-    joinSection.style.display = "none";
+    if (joinSection) joinSection.style.display = "none";
 
     api.clearMiniGame();
   });
@@ -266,10 +285,13 @@ function tryJoin() {
 // ===========================
 // BUZZ (Grandprix)
 // ===========================
-// IMPORTANT: Do NOT attempt to play audio here.
-// Audio must be controlled by phase (listening/locked) via renderGrandprix().
-buzzBtn?.addEventListener("click", () => {
+buzzBtn?.addEventListener("click", async () => {
   if (!joined) return;
+
+  // (Optional) if audio is paused, try to resume on user gesture
+  if (window.__grandprixAudio && window.__grandprixAudio.paused) {
+    try { await window.__grandprixAudio.play(); } catch {}
+  }
 
   lastBuzzAt = Date.now();
   lastBuzzRoundId = window.__currentRoundId || null;
@@ -331,6 +353,7 @@ function ensureNisseGaadenAnswer() {
     if (!text) return;
 
     socket.emit("submitCard", { teamName: myTeamName, text });
+
     ngAnsweredRoundId = window.__currentRoundId || null;
 
     ngInput.value = "";
@@ -339,7 +362,7 @@ function ensureNisseGaadenAnswer() {
   };
 
   ngWrap.append(ngInput, ngBtn);
-  challengeText.parentElement.appendChild(ngWrap);
+  challengeText?.parentElement?.appendChild(ngWrap);
 }
 
 function showNisseGaadenAnswer() {
@@ -412,12 +435,14 @@ function ensureGpAnswerUI() {
   }
 }
 
+// Option 1 popup: startMs must be server-time-aligned; seconds is just display
 function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (!gpPopup || !gpPopupCountdown) return;
 
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
+  // New round => reset answer lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -437,7 +462,7 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (gpPopupTimer) clearInterval(gpPopupTimer);
 
   function tick() {
-    const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+    const elapsed = Math.floor((nowMs() - startAtMs) / 1000);
     const left = Math.max(0, seconds - elapsed);
     gpPopupCountdown.textContent = left;
 
@@ -467,6 +492,7 @@ function renderChallenge(ch) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
+  // Stop all mini-games before switch
   stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
@@ -474,16 +500,16 @@ function renderChallenge(ch) {
   stopBilledeQuiz(api);
 
   if (!ch) {
-    challengeTitle.textContent = "Ingen udfordring endnu";
-    challengeText.textContent = "Vent på læreren…";
+    if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
+    if (challengeText) challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
     return;
   }
 
   window.__currentRoundId = ch.id || null;
 
-  challengeTitle.textContent = ch.type || "Udfordring";
-  challengeText.textContent = ch.text || "";
+  if (challengeTitle) challengeTitle.textContent = ch.type || "Udfordring";
+  if (challengeText) challengeText.textContent = ch.text || "";
 
   if (ch.type === "Nisse Grandprix") {
     renderGrandprix(ch, api);
@@ -494,8 +520,10 @@ function renderChallenge(ch) {
     renderNisseGaaden(ch, api);
 
     const alreadyAnswered = ch.id && ngAnsweredRoundId && ch.id === ngAnsweredRoundId;
+
     if (!alreadyAnswered) showNisseGaadenAnswer();
     else api.showStatus("✅ Svar sendt. Vent på læreren…");
+
     return;
   }
 
@@ -523,13 +551,16 @@ function renderChallenge(ch) {
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (s.gameCode) codeDisplay.textContent = s.gameCode;
+  updateServerOffset(s.serverNow);
+
+  if (s.gameCode && codeDisplay) codeDisplay.textContent = s.gameCode;
 
   renderLeaderboard(s.teams || []);
   renderChallenge(s.currentChallenge);
 
   const ch = s.currentChallenge;
 
+  // ---------- Grandprix lock-out for teams that already answered wrong ----------
   if (ch && ch.type === "Nisse Grandprix") {
     const answeredTeams = ch.answeredTeams || {};
     const normalizeName = (x) => (x || "").trim().toLowerCase();
@@ -551,29 +582,27 @@ socket.on("state", (s) => {
     ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
+  // Fallback: if we buzzed very recently for same round, treat as first (UI only)
   if (!iAmFirstBuzz && isLockedGP) {
     const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
     if (sameRound && recent) iAmFirstBuzz = true;
   }
 
-// Use countdownStartAt if available, otherwise fall back to startAt
-const gpStart =
-  ch && ch.type === "Nisse Grandprix" && ch.phase === "locked"
-    ? (ch.countdownStartAt ?? ch.startAt ?? null)
-    : null;
+  // --------- FIX: Popup timing uses phaseStartAt/phaseDurationSec (Option 1) ----------
+  if (isLockedGP) {
+    const startAt = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : null;
+    const dur = typeof ch.phaseDurationSec === "number" ? ch.phaseDurationSec : 20;
 
-if (isLockedGP && gpStart) {
-  showGrandprixPopup(
-    gpStart,
-    ch.countdownSeconds || 20,
-    iAmFirstBuzz,
-    ch.id
-  );
-} else {
-  hideGrandprixPopup();
-}
-
+    if (startAt) {
+      showGrandprixPopup(startAt, dur, iAmFirstBuzz, ch.id);
+    } else {
+      // If server forgot startAt, hide popup (better than wrong timer)
+      hideGrandprixPopup();
+    }
+  } else {
+    hideGrandprixPopup();
+  }
 });
 
 // When points change, show a toast on all teams
@@ -587,7 +616,9 @@ socket.on("show-winner", (payload) => {
 });
 
 // =====================================================
-// VOICE MESSAGE FEATURE (matches server.js + main.js)
+// VOICE MESSAGE FEATURE (matches server.js/main.js)
+// Server emits: "send-voice"
+// Static path: "/uploads-audio/<filename>"
 // =====================================================
 let voiceOverlayEl = null;
 
@@ -666,4 +697,3 @@ function showVoiceOverlay({ filename, from, createdAt } = {}) {
 socket.on("send-voice", (payload) => {
   showVoiceOverlay(payload || {});
 });
-
