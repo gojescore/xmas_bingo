@@ -1,12 +1,12 @@
-// public/team.js v43 (option1 + normalized types + GP awaiting phase)
+// public/team.js v44 (option1 + server-time api + robust GP awaiting + normalized types)
 // Fixes:
-// - Grandprix popup uses phaseStartAt/phaseDurationSec (server-authoritative)
-// - After typed answer, server phase becomes "awaiting" => popup hidden, buzz disabled, audio stays paused
-// - Normalizes challenge type strings (Julekortet vs JuleKortet etc)
+// - Exposes api.nowMs() so minigames (JuleKortet etc.) can use server-authoritative timers
+// - GP: treats "typedAnswer exists" as awaiting even if server doesn't set phase="awaiting" yet
+// - Keeps your existing v43 behavior otherwise
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=4";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
-import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
+import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js?v=6";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
 import { renderBilledeQuiz, stopBilledeQuiz } from "./minigames/billedequiz.js";
 
@@ -182,6 +182,7 @@ function showWinnerOverlay(payload = {}) {
 
 // ---------- Mini-game API ----------
 const api = {
+  nowMs, // ✅ exposed for server-authoritative countdowns in minigames
   setBuzzEnabled(enabled) {
     if (buzzBtn) buzzBtn.disabled = !enabled;
   },
@@ -407,6 +408,7 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
+    if (gpAnswerInput) gpAnswerInput.value = "";
   }
 
   if (iAmFirstBuzz) {
@@ -462,7 +464,7 @@ function normType(type) {
 // ===========================
 // Challenge router
 // ===========================
-function renderChallenge(ch) {
+function renderChallenge(chRaw) {
   api.setBuzzEnabled(false);
   hideNisseGaadenAnswer();
 
@@ -472,14 +474,14 @@ function renderChallenge(ch) {
   stopKreaNissen(api);
   stopBilledeQuiz(api);
 
-  if (!ch) {
+  if (!chRaw) {
     if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
     if (challengeText) challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
     return;
   }
 
-  ch.type = normType(ch.type);
+  const ch = { ...chRaw, type: normType(chRaw.type) };
 
   window.__currentRoundId = ch.id || null;
 
@@ -547,31 +549,44 @@ socket.on("state", (s) => {
     if (alreadyAnswered) api.setBuzzEnabled(false);
   }
 
+  // GP phases
   const isLockedGP = ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
-  const isAwaitingGP = ch && ch.type === "Nisse Grandprix" && ch.phase === "awaiting";
+
+  // Robust awaiting detection:
+  // - If server uses phase="awaiting": use it
+  // - If server hasn't been updated but typedAnswer exists: treat as awaiting client-side
+  const isAwaitingGP =
+    ch &&
+    ch.type === "Nisse Grandprix" &&
+    (ch.phase === "awaiting" || (!!ch.typedAnswer && ch.phase === "locked"));
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
   let iAmFirstBuzz =
     joined &&
     (isLockedGP || isAwaitingGP) &&
-    ch.firstBuzz &&
+    ch?.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
   if (!iAmFirstBuzz && (isLockedGP || isAwaitingGP)) {
-    const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
+    const sameRound = ch?.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
     if (sameRound && recent) iAmFirstBuzz = true;
   }
 
-  // Popup shown ONLY during "locked" typing window
-  if (isLockedGP && typeof ch.phaseStartAt === "number" && typeof ch.phaseDurationSec === "number") {
+  // Popup shown ONLY during locked typing window AND only if not "awaiting"
+  if (
+    isLockedGP &&
+    !isAwaitingGP &&
+    typeof ch.phaseStartAt === "number" &&
+    typeof ch.phaseDurationSec === "number"
+  ) {
     showGrandprixPopup(ch.phaseStartAt, ch.phaseDurationSec, iAmFirstBuzz, ch.id);
   } else {
     hideGrandprixPopup();
   }
 
-  // During awaiting decision: keep buzz disabled and show a status for the buzzing team
+  // During awaiting decision: keep buzz disabled and show status for buzzing team
   if (isAwaitingGP) {
     api.setBuzzEnabled(false);
     if (iAmFirstBuzz) api.showStatus("⏳ Vent… læreren vurderer jeres svar.");
