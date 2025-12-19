@@ -1,9 +1,8 @@
-// public/team.js v42-option1
-// Option 1: Server-authoritative timing. Teams render countdown using serverNow offset.
-// Fixes Grandprix popup timing to use: ch.phaseStartAt + ch.phaseDurationSec (server truth).
-// Keeps winner overlay, score toast, and corrected voice message feature.
+// public/team.js v42
+// Only change from v41: BUZZ must NOT try to restart audio.
+// Audio is controlled by grandprix.js and MUST remain paused while locked.
 
-import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=3";
+import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=5";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
 import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
@@ -39,10 +38,6 @@ let joined = false;
 let joinedCode = null;
 let myTeamName = null;
 
-// Server time offset (serverNow - Date.now)
-let serverOffsetMs = 0;
-const nowMs = () => Date.now() + serverOffsetMs;
-
 // Local Grandprix "I buzzed!" fallback
 let lastBuzzRoundId = null;
 let lastBuzzAt = 0;
@@ -67,10 +62,11 @@ function showScoreToast(teamName, delta) {
   }
 
   const abs = Math.abs(delta);
+  const pointWord = abs === 1 ? "point" : "point";
   const msg =
     delta > 0
-      ? `${teamName} har fået ${abs} point!`
-      : `${teamName} har mistet ${abs} point!`;
+      ? `${teamName} har fået ${abs} ${pointWord}!`
+      : `${teamName} har mistet ${abs} ${pointWord}!`;
 
   scoreToastEl.className = "score-toast";
   if (delta > 0) scoreToastEl.classList.add("score-toast--gain");
@@ -224,16 +220,16 @@ codeInput?.addEventListener("keydown", (e) => {
 });
 
 function tryCode() {
-  const code = (codeInput?.value || "").trim();
+  const code = codeInput.value.trim();
   if (!code) {
-    if (joinMsg) joinMsg.textContent = "Skriv en kode først.";
+    joinMsg.textContent = "Skriv en kode først.";
     return;
   }
   joinedCode = code;
-  if (codeDisplay) codeDisplay.textContent = code;
-  if (joinMsg) joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
-  if (nameRow) nameRow.style.display = "flex";
-  nameInput?.focus();
+  codeDisplay.textContent = code;
+  joinMsg.textContent = "Kode accepteret. Skriv jeres teamnavn.";
+  nameRow.style.display = "flex";
+  nameInput.focus();
 }
 
 // ===========================
@@ -245,15 +241,15 @@ nameInput?.addEventListener("keydown", (e) => {
 });
 
 function tryJoin() {
-  const name = (nameInput?.value || "").trim();
+  const name = nameInput.value.trim();
   if (!name) {
-    if (joinMsg) joinMsg.textContent = "Skriv et teamnavn.";
+    joinMsg.textContent = "Skriv et teamnavn.";
     return;
   }
 
   socket.emit("joinGame", { code: joinedCode, teamName: name }, (res) => {
     if (!res?.ok) {
-      if (joinMsg) joinMsg.textContent = res?.message || "Kunne ikke joine.";
+      joinMsg.textContent = res?.message || "Kunne ikke joine.";
       return;
     }
 
@@ -261,7 +257,7 @@ function tryJoin() {
     myTeamName = res.team.name;
 
     if (teamNameLabel) teamNameLabel.textContent = myTeamName;
-    if (joinSection) joinSection.style.display = "none";
+    joinSection.style.display = "none";
 
     api.clearMiniGame();
   });
@@ -270,15 +266,10 @@ function tryJoin() {
 // ===========================
 // BUZZ (Grandprix)
 // ===========================
-buzzBtn?.addEventListener("click", async () => {
+// IMPORTANT: Do NOT attempt to play audio here.
+// Audio must be controlled by phase (listening/locked) via renderGrandprix().
+buzzBtn?.addEventListener("click", () => {
   if (!joined) return;
-
-  // Attempt to resume audio if browser blocked autoplay
-  if (window.__grandprixAudio && window.__grandprixAudio.paused) {
-    try {
-      await window.__grandprixAudio.play();
-    } catch {}
-  }
 
   lastBuzzAt = Date.now();
   lastBuzzRoundId = window.__currentRoundId || null;
@@ -298,9 +289,7 @@ function renderLeaderboard(teams) {
   if (!teamListEl) return;
 
   const sorted = [...teams].sort((a, b) => {
-    if ((b.points ?? 0) !== (a.points ?? 0)) {
-      return (b.points ?? 0) - (a.points ?? 0);
-    }
+    if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
     return (a.name || "").localeCompare(b.name || "");
   });
 
@@ -327,25 +316,21 @@ function ensureNisseGaadenAnswer() {
   if (ngWrap) return;
 
   ngWrap = document.createElement("div");
-  ngWrap.style.cssText =
-    "margin-top:12px; display:flex; gap:8px; justify-content:center;";
+  ngWrap.style.cssText = "margin-top:12px; display:flex; gap:8px; justify-content:center;";
 
   ngInput = document.createElement("input");
   ngInput.placeholder = "Skriv jeres svar her…";
-  ngInput.style.cssText =
-    "font-size:1.2rem; padding:10px; width:320px;";
+  ngInput.style.cssText = "font-size:1.2rem; padding:10px; width:320px;";
 
   ngBtn = document.createElement("button");
   ngBtn.textContent = "Send svar";
-  ngBtn.style.cssText =
-    "font-size:1.2rem; padding:10px 14px; font-weight:800; cursor:pointer;";
+  ngBtn.style.cssText = "font-size:1.2rem; padding:10px 14px; font-weight:800; cursor:pointer;";
 
   ngBtn.onclick = () => {
     const text = (ngInput.value || "").trim();
     if (!text) return;
 
     socket.emit("submitCard", { teamName: myTeamName, text });
-
     ngAnsweredRoundId = window.__currentRoundId || null;
 
     ngInput.value = "";
@@ -354,7 +339,7 @@ function ensureNisseGaadenAnswer() {
   };
 
   ngWrap.append(ngInput, ngBtn);
-  challengeText?.parentElement?.appendChild(ngWrap);
+  challengeText.parentElement.appendChild(ngWrap);
 }
 
 function showNisseGaadenAnswer() {
@@ -392,8 +377,7 @@ function ensureGpAnswerUI() {
     `;
 
     gpNoteEl = document.createElement("div");
-    gpNoteEl.style.cssText =
-      "font-size:1.1rem; font-weight:700; text-align:center;";
+    gpNoteEl.style.cssText = "font-size:1.1rem; font-weight:700; text-align:center;";
 
     gpAnswerInput = document.createElement("input");
     gpAnswerInput.placeholder = "Skriv jeres svar …";
@@ -428,13 +412,12 @@ function ensureGpAnswerUI() {
   }
 }
 
-function showGrandprixPopup(phaseStartAtMs, seconds, iAmFirstBuzz, roundId) {
+function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (!gpPopup || !gpPopupCountdown) return;
 
   ensureGpAnswerUI();
   gpPopup.style.display = "flex";
 
-  // new round => reset lock
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
@@ -454,8 +437,8 @@ function showGrandprixPopup(phaseStartAtMs, seconds, iAmFirstBuzz, roundId) {
   if (gpPopupTimer) clearInterval(gpPopupTimer);
 
   function tick() {
-    const elapsed = Math.floor((nowMs() - phaseStartAtMs) / 1000);
-    const left = Math.max(0, (seconds || 20) - elapsed);
+    const elapsed = Math.floor((Date.now() - startAtMs) / 1000);
+    const left = Math.max(0, seconds - elapsed);
     gpPopupCountdown.textContent = left;
 
     if (left <= 0) {
@@ -491,16 +474,16 @@ function renderChallenge(ch) {
   stopBilledeQuiz(api);
 
   if (!ch) {
-    if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
-    if (challengeText) challengeText.textContent = "Vent på læreren…";
+    challengeTitle.textContent = "Ingen udfordring endnu";
+    challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
     return;
   }
 
   window.__currentRoundId = ch.id || null;
 
-  if (challengeTitle) challengeTitle.textContent = ch.type || "Udfordring";
-  if (challengeText) challengeText.textContent = ch.text || "";
+  challengeTitle.textContent = ch.type || "Udfordring";
+  challengeText.textContent = ch.text || "";
 
   if (ch.type === "Nisse Grandprix") {
     renderGrandprix(ch, api);
@@ -510,14 +493,9 @@ function renderChallenge(ch) {
   if (ch.type === "NisseGåden") {
     renderNisseGaaden(ch, api);
 
-    const alreadyAnswered =
-      ch.id && ngAnsweredRoundId && ch.id === ngAnsweredRoundId;
-
-    if (!alreadyAnswered) {
-      showNisseGaadenAnswer();
-    } else {
-      api.showStatus("✅ Svar sendt. Vent på læreren…");
-    }
+    const alreadyAnswered = ch.id && ngAnsweredRoundId && ch.id === ngAnsweredRoundId;
+    if (!alreadyAnswered) showNisseGaadenAnswer();
+    else api.showStatus("✅ Svar sendt. Vent på læreren…");
     return;
   }
 
@@ -545,18 +523,13 @@ function renderChallenge(ch) {
 socket.on("state", (s) => {
   if (!s) return;
 
-  if (typeof s.serverNow === "number") {
-    serverOffsetMs = s.serverNow - Date.now();
-  }
-
-  if (s.gameCode && codeDisplay) codeDisplay.textContent = s.gameCode;
+  if (s.gameCode) codeDisplay.textContent = s.gameCode;
 
   renderLeaderboard(s.teams || []);
   renderChallenge(s.currentChallenge);
 
   const ch = s.currentChallenge;
 
-  // ---------- Grandprix lock-out for teams that already answered wrong ----------
   if (ch && ch.type === "Nisse Grandprix") {
     const answeredTeams = ch.answeredTeams || {};
     const normalizeName = (x) => (x || "").trim().toLowerCase();
@@ -566,14 +539,10 @@ socket.on("state", (s) => {
       (name) => normalizeName(name) === me
     );
 
-    if (alreadyAnswered) {
-      api.setBuzzEnabled(false);
-    }
+    if (alreadyAnswered) api.setBuzzEnabled(false);
   }
 
-  const isLockedGP =
-    ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
-
+  const isLockedGP = ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
   const normalize = (x) => (x || "").trim().toLowerCase();
 
   let iAmFirstBuzz =
@@ -588,11 +557,10 @@ socket.on("state", (s) => {
     if (sameRound && recent) iAmFirstBuzz = true;
   }
 
-  // IMPORTANT (Option 1): use server phase timing fields
-  if (isLockedGP && typeof ch.phaseStartAt === "number") {
+  if (isLockedGP && ch.countdownStartAt) {
     showGrandprixPopup(
-      ch.phaseStartAt,
-      ch.phaseDurationSec || 20,
+      ch.countdownStartAt,
+      ch.countdownSeconds || 20,
       iAmFirstBuzz,
       ch.id
     );
@@ -612,9 +580,7 @@ socket.on("show-winner", (payload) => {
 });
 
 // =====================================================
-// VOICE MESSAGE FEATURE (matches server.js/main.js)
-// Server emits: "send-voice"
-// Static path: "/uploads-audio/<filename>"
+// VOICE MESSAGE FEATURE (matches server.js + main.js)
 // =====================================================
 let voiceOverlayEl = null;
 
