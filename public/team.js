@@ -1,12 +1,12 @@
-// public/team.js v44 (option1 + server-time api + robust GP awaiting + normalized types)
+// public/team.js v44 (option1 + stable minigame lifecycle + JuleKortet end handling)
 // Fixes:
-// - Exposes api.nowMs() so minigames (JuleKortet etc.) can use server-authoritative timers
-// - GP: treats "typedAnswer exists" as awaiting even if server doesn't set phase="awaiting" yet
-// - Keeps your existing v43 behavior otherwise
+// - Do NOT stop/recreate minigames on every state tick (prevents popup flashing + resets)
+// - Only stop/restart when challenge type/id changes
+// - Treat JuleKortet phase "ended" as finished on team screens -> show "Vent på læreren…"
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=4";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
-import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js?v=6";
+import { renderJuleKortet, stopJuleKortet } from "./minigames/julekortet.js?v=7";
 import { renderKreaNissen, stopKreaNissen } from "./minigames/kreanissen.js?v=2";
 import { renderBilledeQuiz, stopBilledeQuiz } from "./minigames/billedequiz.js";
 
@@ -49,6 +49,9 @@ let gpAnsweredRoundId = null;
 let gpSentThisRound = false;
 
 let ngAnsweredRoundId = null;
+
+// Track current running minigame (type + id) so we don't stop/recreate on every state tick
+let activeChallengeKey = "none"; // format: "<Type>::<id>"
 
 // ---------- Time helpers ----------
 function updateServerOffset(serverNow) {
@@ -126,18 +129,6 @@ function showWinnerOverlay(payload = {}) {
         position: relative;
         overflow: hidden;
       ">
-        <div style="
-          position:absolute;
-          top:-4px; left:0; right:0;
-          height:24px;
-          background:
-            radial-gradient(circle at 10% 100%, #ffd966 0 12px, transparent 13px),
-            radial-gradient(circle at 30% 120%, #ff6f6f 0 10px, transparent 11px),
-            radial-gradient(circle at 55% 100%, #7fffd4 0 11px, transparent 12px),
-            radial-gradient(circle at 80% 120%, #ffd966 0 10px, transparent 11px),
-            linear-gradient(90deg, #0b3d0b 0 10%, #145214 10% 20%, #0b3d0b 20% 30%, #145214 30% 40%, #0b3d0b 40% 50%, #145214 50% 60%, #0b3d0b 60% 70%, #145214 70% 80%, #0b3d0b 80% 90%, #145214 90% 100%);
-        "></div>
-
         <h1 style="font-size:2.6rem; margin:18px 0 6px; text-shadow:0 0 16px rgba(0,0,0,0.7);">
           🎄 VINDER AF XMAS CHALLENGE 🎄
         </h1>
@@ -182,7 +173,6 @@ function showWinnerOverlay(payload = {}) {
 
 // ---------- Mini-game API ----------
 const api = {
-  nowMs, // ✅ exposed for server-authoritative countdowns in minigames
   setBuzzEnabled(enabled) {
     if (buzzBtn) buzzBtn.disabled = !enabled;
   },
@@ -197,6 +187,14 @@ const api = {
     stopBilledeQuiz(api);
   }
 };
+
+function stopAllMiniGames() {
+  stopGrandprix();
+  stopNisseGaaden(api);
+  stopJuleKortet(api);
+  stopKreaNissen(api);
+  stopBilledeQuiz(api);
+}
 
 // ===========================
 // JOIN
@@ -408,7 +406,6 @@ function showGrandprixPopup(startAtMs, seconds, iAmFirstBuzz, roundId) {
   if (roundId && roundId !== gpAnsweredRoundId) {
     gpAnsweredRoundId = roundId;
     gpSentThisRound = false;
-    if (gpAnswerInput) gpAnswerInput.value = "";
   }
 
   if (iAmFirstBuzz) {
@@ -449,7 +446,7 @@ function hideGrandprixPopup() {
 }
 
 // ===========================
-// Challenge type normalize (client side)
+// Challenge type normalize
 // ===========================
 function normType(type) {
   const raw = String(type || "").trim().toLowerCase().replace(/[\s\-_]/g, "");
@@ -461,32 +458,51 @@ function normType(type) {
   return type;
 }
 
+function getChallengeKey(ch) {
+  if (!ch) return "none";
+  const t = normType(ch.type);
+  const id = ch.id || "";
+  return `${t}::${id}`;
+}
+
 // ===========================
 // Challenge router
 // ===========================
 function renderChallenge(chRaw) {
-  api.setBuzzEnabled(false);
-  hideNisseGaadenAnswer();
+  const ch = chRaw ? { ...chRaw, type: normType(chRaw.type) } : null;
+  const newKey = getChallengeKey(ch);
 
-  stopGrandprix();
-  stopNisseGaaden(api);
-  stopJuleKortet(api);
-  stopKreaNissen(api);
-  stopBilledeQuiz(api);
+  // If challenge changed (type/id), stop previous minigames once
+  if (newKey !== activeChallengeKey) {
+    stopAllMiniGames();
+    api.clearMiniGame();
+    activeChallengeKey = newKey;
+  }
 
-  if (!chRaw) {
+  // No challenge => waiting
+  if (!ch) {
     if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
     if (challengeText) challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
     return;
   }
 
-  const ch = { ...chRaw, type: normType(chRaw.type) };
+  // If JuleKortet is ended, treat as "done" for teams => waiting screen
+  if (ch.type === "JuleKortet" && ch.phase === "ended") {
+    stopJuleKortet(api);
+    if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
+    if (challengeText) challengeText.textContent = "Vent på læreren…";
+    api.clearMiniGame();
+    return;
+  }
 
   window.__currentRoundId = ch.id || null;
 
   if (challengeTitle) challengeTitle.textContent = ch.type || "Udfordring";
   if (challengeText) challengeText.textContent = ch.text || "";
+
+  // Always hide non-relevant UI bits before render
+  hideNisseGaadenAnswer();
 
   if (ch.type === "Nisse Grandprix") {
     renderGrandprix(ch, api);
@@ -549,35 +565,26 @@ socket.on("state", (s) => {
     if (alreadyAnswered) api.setBuzzEnabled(false);
   }
 
-  // GP phases
   const isLockedGP = ch && ch.type === "Nisse Grandprix" && ch.phase === "locked";
-
-  // Robust awaiting detection:
-  // - If server uses phase="awaiting": use it
-  // - If server hasn't been updated but typedAnswer exists: treat as awaiting client-side
-  const isAwaitingGP =
-    ch &&
-    ch.type === "Nisse Grandprix" &&
-    (ch.phase === "awaiting" || (!!ch.typedAnswer && ch.phase === "locked"));
+  const isAwaitingGP = ch && ch.type === "Nisse Grandprix" && ch.phase === "awaiting";
 
   const normalize = (x) => (x || "").trim().toLowerCase();
 
   let iAmFirstBuzz =
     joined &&
     (isLockedGP || isAwaitingGP) &&
-    ch?.firstBuzz &&
+    ch.firstBuzz &&
     normalize(ch.firstBuzz.teamName) === normalize(myTeamName);
 
   if (!iAmFirstBuzz && (isLockedGP || isAwaitingGP)) {
-    const sameRound = ch?.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
+    const sameRound = ch.id && lastBuzzRoundId && ch.id === lastBuzzRoundId;
     const recent = Date.now() - lastBuzzAt < 8000;
     if (sameRound && recent) iAmFirstBuzz = true;
   }
 
-  // Popup shown ONLY during locked typing window AND only if not "awaiting"
+  // Popup shown ONLY during "locked"
   if (
     isLockedGP &&
-    !isAwaitingGP &&
     typeof ch.phaseStartAt === "number" &&
     typeof ch.phaseDurationSec === "number"
   ) {
@@ -586,7 +593,6 @@ socket.on("state", (s) => {
     hideGrandprixPopup();
   }
 
-  // During awaiting decision: keep buzz disabled and show status for buzzing team
   if (isAwaitingGP) {
     api.setBuzzEnabled(false);
     if (iAmFirstBuzz) api.showStatus("⏳ Vent… læreren vurderer jeres svar.");
