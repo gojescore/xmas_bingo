@@ -1,392 +1,380 @@
-// public/minigames/kreanissen.js v2
-// KreaNissen: 3 min create + webcam photo (take/retake/accept) + anonymous voting
-// Requires HTTPS (you have it) and a user gesture is NOT needed because popup opens from admin action.
+// public/minigames/kreanissen.js v3
+// Fixes:
+// - Voting renders IMMEDIATELY from ch.votingPhotos on ALL clients (no dependency on votes/events)
+// - Stable image URLs (no Date.now() cache-busting loop)
+// - After upload: replaces UI with "Dit billede er sendt" confirmation
+// - Keeps popup open and consistent across phase changes
+// API: renderKreaNissen(ch, api, socket, myTeamName) + stopKreaNissen(api)
 
-let timer = null;
-let popup = null;
+let popupEl = null;
+
+// Per-round flags
+let lastRoundId = null;
 let hasSubmitted = false;
 let hasVoted = false;
 
-// webcam
-let stream = null;
-let videoEl = null;
-let canvasEl = null;
-let photoImgEl = null;
-let photoBlob = null;
-let previewUrl = null;
+// Avoid re-upload spam
+let uploading = false;
 
 function ensurePopup() {
-  if (popup) return popup;
+  if (popupEl) return popupEl;
 
-  popup = document.createElement("div");
-  popup.id = "kreanissenPopup";
-  popup.style.cssText = `
+  popupEl = document.createElement("div");
+  popupEl.id = "kreaPopup";
+  popupEl.style.cssText = `
     position:fixed; inset:0; display:flex; justify-content:center; align-items:center;
     background:rgba(0,0,0,0.65); z-index:9999; padding:16px;
   `;
 
-  popup.innerHTML = `
+  popupEl.innerHTML = `
     <div style="
-      width:min(820px, 96vw);
+      width:min(860px, 96vw);
       background:#fff7ef;
       border:8px solid #0b6;
       border-radius:18px;
       padding:18px;
-      box-shadow:0 8px 30px rgba(0,0,0,0.3);
-      text-align:center;
+      box-shadow:0 8px 30px rgba(0,0,0,0.35);
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
     ">
-      <h2 style="margin:0 0 8px; font-size:2.1rem;">🎨 KreaNissen</h2>
-      <p id="knPrompt" style="font-size:1.3rem; font-weight:800; margin:0 0 10px;"></p>
+      <h2 style="margin:0 0 6px; font-size:2rem;">🎨 KreaNissen</h2>
+      <p id="knPrompt" style="margin:0 0 12px; font-weight:800;"></p>
 
-      <div id="knTimerRow" style="font-weight:900; font-size:1.3rem; margin-bottom:10px;">
-        Tid tilbage: <span id="knTimeLeft">180</span>s
-      </div>
+      <div id="knBody"></div>
 
-      <!-- CAMERA AREA -->
-      <div id="knCameraWrap" style="display:flex; flex-direction:column; gap:10px; align-items:center;">
-        <video id="knVideo" autoplay playsinline style="
-          width:100%; max-width:640px; border-radius:12px; border:2px solid #ccc; background:#000;
-        "></video>
-
-        <img id="knPhotoPreview" style="
-          display:none; width:100%; max-width:640px;
-          border-radius:12px; border:2px solid #ccc;
-        " />
-
-        <canvas id="knCanvas" style="display:none;"></canvas>
-
-        <div id="knButtons" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
-          <button id="knTakeBtn" style="
-            font-size:1.3rem; font-weight:900; padding:10px 14px;
-            border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
-          ">📸 Tag foto</button>
-
-          <button id="knRetryBtn" disabled style="
-            font-size:1.3rem; font-weight:900; padding:10px 14px;
-            border-radius:12px; border:none; background:#555; color:#fff; cursor:pointer;
-            opacity:0.6;
-          ">🔁 Prøv igen</button>
-
-          <button id="knAcceptBtn" disabled style="
-            font-size:1.3rem; font-weight:900; padding:10px 14px;
-            border-radius:12px; border:none; background:#1a7f37; color:#fff; cursor:pointer;
-            opacity:0.6;
-          ">✅ Accepter</button>
-        </div>
-
-        <p id="knStatus" style="margin:0; font-weight:800;"></p>
-      </div>
-
-      <div id="knVoteWrap" style="margin-top:14px;"></div>
+      <p id="knStatus" style="margin-top:12px; font-weight:900;"></p>
     </div>
   `;
 
-  document.body.appendChild(popup);
-  return popup;
+  document.body.appendChild(popupEl);
+  return popupEl;
 }
 
-async function startCamera() {
-  stopCamera();
-
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false
-    });
-    if (videoEl) {
-      videoEl.srcObject = stream;
-      await videoEl.play();
-    }
-  } catch (err) {
-    console.error(err);
-    throw new Error("camera_denied");
+function resetPerRoundIfNeeded(roundId) {
+  if (!roundId) return;
+  if (roundId !== lastRoundId) {
+    lastRoundId = roundId;
+    hasSubmitted = false;
+    hasVoted = false;
+    uploading = false;
   }
 }
 
-function stopCamera() {
-  if (stream) {
-    stream.getTracks().forEach(t => {
-      try { t.stop(); } catch {}
-    });
-    stream = null;
-  }
+function setStatus(text) {
+  const statusEl = popupEl?.querySelector("#knStatus");
+  if (statusEl) statusEl.textContent = text || "";
 }
 
-function clearPhoto() {
-  photoBlob = null;
-
-  if (previewUrl) {
-    URL.revokeObjectURL(previewUrl);
-    previewUrl = null;
-  }
-
-  if (photoImgEl) {
-    photoImgEl.src = "";
-    photoImgEl.style.display = "none";
-  }
-  if (videoEl) videoEl.style.display = "block";
+function stableImgSrc(filename, seed) {
+  // Stable seed per phase switch so caches behave, but doesn't thrash every render.
+  // Using phaseStartAt is good: changes when phase changes, not on every UI refresh.
+  const v = typeof seed === "number" ? seed : 1;
+  return `/uploads/${filename}?v=${v}`;
 }
 
-function takePhoto() {
-  if (!videoEl || !canvasEl) return;
-
-  const w = videoEl.videoWidth || 640;
-  const h = videoEl.videoHeight || 480;
-
-  canvasEl.width = w;
-  canvasEl.height = h;
-
-  const ctx = canvasEl.getContext("2d");
-  ctx.drawImage(videoEl, 0, 0, w, h);
-
-  return new Promise((resolve) => {
-    canvasEl.toBlob((blob) => {
-      photoBlob = blob;
-
-      if (photoImgEl) {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        previewUrl = URL.createObjectURL(blob);
-        photoImgEl.src = previewUrl;
-        photoImgEl.style.display = "block";
-      }
-
-      videoEl.style.display = "none";
-      resolve(blob);
-    }, "image/jpeg", 0.9);
-  });
-}
-
-async function uploadBlob(blob) {
+async function uploadPhotoFile(file) {
   const fd = new FormData();
-  fd.append("file", blob, "kreanissen.jpg");
+  fd.append("file", file, file.name || "photo.jpg");
 
   const res = await fetch("/upload", { method: "POST", body: fd });
   if (!res.ok) throw new Error("upload failed");
+
   const json = await res.json();
+  if (!json?.filename) throw new Error("no filename");
+
   return json.filename;
 }
 
+function renderCreating(ch, api, socket, myTeamName) {
+  const body = popupEl.querySelector("#knBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "display:flex; flex-direction:column; gap:12px;";
+
+  const info = document.createElement("div");
+  info.style.cssText = "font-weight:900; font-size:1.1rem;";
+  info.textContent = "Upload et billede af jeres krea-ting.";
+
+  wrap.appendChild(info);
+
+  // If already submitted: show confirmation message only (no more typing/upload UI)
+  if (hasSubmitted) {
+    const done = document.createElement("div");
+    done.style.cssText = `
+      padding:14px;
+      border-radius:14px;
+      background:#eafff1;
+      border:2px solid #0b6;
+      font-weight:900;
+      font-size:1.35rem;
+      text-align:center;
+    `;
+    done.textContent = "✅ Dit billede er sendt. Vent på læreren…";
+    wrap.appendChild(done);
+
+    body.appendChild(wrap);
+    api?.showStatus?.("Vent på læreren…");
+    setStatus("");
+    return;
+  }
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.style.cssText = "font-size:1.1rem;";
+
+  const preview = document.createElement("img");
+  preview.style.cssText = "max-width:100%; max-height:320px; border-radius:12px; display:none; border:2px solid #ddd;";
+
+  let selectedFile = null;
+
+  input.onchange = () => {
+    const f = input.files?.[0] || null;
+    selectedFile = f;
+
+    if (!f) {
+      preview.style.display = "none";
+      preview.src = "";
+      return;
+    }
+
+    const url = URL.createObjectURL(f);
+    preview.src = url;
+    preview.style.display = "block";
+    setStatus("");
+  };
+
+  const sendBtn = document.createElement("button");
+  sendBtn.textContent = "Send billede";
+  sendBtn.style.cssText = `
+    font-size:1.35rem; font-weight:900; padding:12px 14px;
+    border-radius:12px; border:none; background:#0b6; color:#fff; cursor:pointer;
+    width:fit-content;
+  `;
+
+  sendBtn.onclick = async () => {
+    if (uploading) return;
+    if (!selectedFile) {
+      setStatus("Vælg et billede først.");
+      return;
+    }
+
+    uploading = true;
+    sendBtn.disabled = true;
+    input.disabled = true;
+    setStatus("⏳ Uploader…");
+
+    try {
+      const filename = await uploadPhotoFile(selectedFile);
+
+      socket.emit("submitPhoto", {
+        teamName: myTeamName,
+        filename
+      });
+
+      hasSubmitted = true;
+
+      // Replace the UI with a clear confirmation
+      body.innerHTML = "";
+      const done = document.createElement("div");
+      done.style.cssText = `
+        padding:14px;
+        border-radius:14px;
+        background:#eafff1;
+        border:2px solid #0b6;
+        font-weight:900;
+        font-size:1.35rem;
+        text-align:center;
+      `;
+      done.textContent = "✅ Dit billede er sendt. Vent på læreren…";
+      body.appendChild(done);
+
+      api?.showStatus?.("Vent på læreren…");
+      setStatus("");
+    } catch (err) {
+      console.error(err);
+      setStatus("⚠️ Upload fejlede. Prøv igen.");
+      sendBtn.disabled = false;
+      input.disabled = false;
+    } finally {
+      uploading = false;
+    }
+  };
+
+  wrap.appendChild(input);
+  wrap.appendChild(preview);
+  wrap.appendChild(sendBtn);
+
+  body.appendChild(wrap);
+}
+
+function renderVoting(ch, api, socket, myTeamName) {
+  const body = popupEl.querySelector("#knBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+
+  // IMPORTANT: render directly from server state
+  const photos = Array.isArray(ch.votingPhotos) ? ch.votingPhotos : [];
+
+  if (!photos.length) {
+    const p = document.createElement("div");
+    p.style.cssText = "font-weight:900; font-size:1.2rem; text-align:center; padding:16px;";
+    p.textContent = "⏳ Vent… der er ingen billeder endnu.";
+    body.appendChild(p);
+    api?.showStatus?.("Vent på læreren…");
+    setStatus("");
+    return;
+  }
+
+  const statusTop = document.createElement("div");
+  statusTop.style.cssText = "font-weight:900; font-size:1.2rem; margin-bottom:10px;";
+  statusTop.textContent = hasVoted
+    ? "✅ Din stemme er afgivet!"
+    : "Afstemning i gang! Vælg jeres favoritbillede.";
+  body.appendChild(statusTop);
+
+  const grid = document.createElement("div");
+  grid.style.cssText = `
+    display:grid; gap:10px;
+    grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+  `;
+
+  const normalize = (x) => (x || "").trim().toLowerCase();
+  const me = normalize(myTeamName);
+
+  // Use phaseStartAt as stable cache-bust seed for the voting phase
+  const seed = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : 1;
+
+  photos.forEach((p, i) => {
+    const owner = p.ownerTeamName || "";
+    const isMine = normalize(owner) === me;
+
+    const card = document.createElement("button");
+    card.type = "button";
+    card.style.cssText = `
+      text-align:left; padding:10px; border-radius:12px;
+      border:2px solid #0b6; background:#fff; cursor:pointer;
+      font-size:1rem;
+      opacity:${isMine ? 0.45 : 1};
+    `;
+    card.disabled = hasVoted || isMine;
+
+    const img = document.createElement("img");
+    img.alt = `Billede #${i + 1}`;
+    img.style.cssText = "width:100%; height:auto; border-radius:10px; display:block; border:1px solid #ddd;";
+    img.src = stableImgSrc(p.filename, seed);
+
+    const label = document.createElement("div");
+    label.style.cssText = "margin-top:8px; font-weight:900;";
+    label.textContent = `Billede #${i + 1}${isMine ? " (Jeres)" : ""}`;
+
+    card.appendChild(img);
+    card.appendChild(label);
+
+    card.onclick = () => {
+      if (hasVoted || isMine) return;
+
+      hasVoted = true;
+      socket.emit("vote", i);
+
+      api?.showStatus?.("✅ Din stemme er afgivet!");
+      setStatus("✅ Tak for din stemme!");
+      // Disable all choices immediately for this client
+      [...grid.querySelectorAll("button")].forEach((b) => (b.disabled = true));
+    };
+
+    grid.appendChild(card);
+  });
+
+  body.appendChild(grid);
+
+  // During voting we don't want "vent på læreren…" as status; it can confuse.
+  api?.showStatus?.("");
+  setStatus("");
+}
+
+function renderEnded(ch, api) {
+  const body = popupEl.querySelector("#knBody");
+  if (!body) return;
+
+  body.innerHTML = "";
+
+  const winners = Array.isArray(ch.winners) ? ch.winners : [];
+
+  const done = document.createElement("div");
+  done.style.cssText = `
+    padding:14px;
+    border-radius:14px;
+    background:#fff;
+    border:2px solid #0b6;
+    font-weight:900;
+    font-size:1.25rem;
+    text-align:center;
+  `;
+  done.textContent = winners.length
+    ? `🎉 Vindere: ${winners.join(", ")}`
+    : "🎉 Runden er slut!";
+
+  body.appendChild(done);
+
+  // This matches your “after minigame ends: vent på læreren…”
+  api?.showStatus?.("Vent på læreren…");
+  setStatus("");
+
+  // Keep visible briefly, then hide
+  setTimeout(() => {
+    if (popupEl) popupEl.style.display = "none";
+  }, 4500);
+}
+
 export function stopKreaNissen(api) {
-  if (timer) clearInterval(timer);
-  timer = null;
-
-  stopCamera();
-
-  if (popup) popup.remove();
-  popup = null;
-
+  uploading = false;
+  lastRoundId = null;
   hasSubmitted = false;
   hasVoted = false;
-  clearPhoto();
+
+  if (popupEl) popupEl.remove();
+  popupEl = null;
 
   api?.showStatus?.("");
 }
 
-export async function renderKreaNissen(ch, api, socket, myTeamName) {
-  api.setBuzzEnabled(false);
+export function renderKreaNissen(ch, api, socket, myTeamName) {
+  api?.setBuzzEnabled?.(false);
 
-  const pop = ensurePopup();
-  pop.style.display = "flex";
+  const popup = ensurePopup();
+  popup.style.display = "flex";
 
-  // DOM inside popup
-  const promptEl = pop.querySelector("#knPrompt");
-  const timeLeftEl = pop.querySelector("#knTimeLeft");
-  const statusEl = pop.querySelector("#knStatus");
-  const voteWrap = pop.querySelector("#knVoteWrap");
-  const timerRow = pop.querySelector("#knTimerRow");
+  const promptEl = popup.querySelector("#knPrompt");
+  if (promptEl) {
+    promptEl.textContent = ch.text || "Lav noget kreativt og upload et billede.";
+  }
 
-  videoEl = pop.querySelector("#knVideo");
-  canvasEl = pop.querySelector("#knCanvas");
-  photoImgEl = pop.querySelector("#knPhotoPreview");
+  // Reset flags when new challenge round starts
+  resetPerRoundIfNeeded(ch.id);
 
-  const takeBtn = pop.querySelector("#knTakeBtn");
-  const retryBtn = pop.querySelector("#knRetryBtn");
-  const acceptBtn = pop.querySelector("#knAcceptBtn");
-
-  promptEl.textContent = ch.text || "Lav noget kreativt og tag et billede!";
-  voteWrap.innerHTML = "";
-
-  // ---------------- CREATING PHASE ----------------
+  // Phase routing (purely state-driven)
   if (ch.phase === "creating") {
-    hasVoted = false;
-
-    timerRow.style.display = "block";
-    statusEl.textContent = hasSubmitted
-      ? "✅ Billede sendt. Vent på afstemning…"
-      : "";
-
-    // reset UI for new round
-    clearPhoto();
-    retryBtn.disabled = true;
-    retryBtn.style.opacity = "0.6";
-    acceptBtn.disabled = true;
-    acceptBtn.style.opacity = "0.6";
-
-    // start camera if not submitted
-    if (!hasSubmitted) {
-      try {
-        await startCamera();
-      } catch {
-        statusEl.textContent = "⚠️ Kamera kræver tilladelse.";
-      }
-    }
-
-    takeBtn.onclick = async () => {
-      if (hasSubmitted) return;
-      await takePhoto();
-      retryBtn.disabled = false;
-      retryBtn.style.opacity = "1";
-      acceptBtn.disabled = false;
-      acceptBtn.style.opacity = "1";
-    };
-
-    retryBtn.onclick = () => {
-      if (hasSubmitted) return;
-      clearPhoto();
-      retryBtn.disabled = true;
-      retryBtn.style.opacity = "0.6";
-      acceptBtn.disabled = true;
-      acceptBtn.style.opacity = "0.6";
-    };
-
-    acceptBtn.onclick = async () => {
-      if (hasSubmitted) return;
-
-      if (!photoBlob) {
-        statusEl.textContent = "Tag et foto først 🙂";
-        return;
-      }
-
-      hasSubmitted = true;
-      takeBtn.disabled = true;
-      retryBtn.disabled = true;
-      acceptBtn.disabled = true;
-      statusEl.textContent = "⏳ Sender billede…";
-
-      try {
-        const filename = await uploadBlob(photoBlob);
-        socket.emit("submitPhoto", { teamName: myTeamName, filename });
-
-        statusEl.textContent = "✅ Billede sendt!";
-        stopCamera();
-        setTimeout(() => (pop.style.display = "none"), 700);
-      } catch (e) {
-        console.error(e);
-        hasSubmitted = false;
-        takeBtn.disabled = false;
-        retryBtn.disabled = false;
-        acceptBtn.disabled = false;
-        statusEl.textContent = "⚠️ Upload fejlede. Prøv igen.";
-      }
-    };
-
-    // timer
-    const startAt = ch.creatingStartAt;
-    const total = ch.creatingSeconds || 180;
-
-    function tick() {
-      const elapsed = Math.floor((Date.now() - startAt) / 1000);
-      const left = Math.max(0, total - elapsed);
-      timeLeftEl.textContent = left;
-
-      if (left <= 0) {
-        clearInterval(timer);
-        timer = null;
-
-        // Auto accept if photo already taken
-        if (!hasSubmitted && photoBlob) {
-          acceptBtn.click();
-        } else {
-          stopCamera();
-          statusEl.textContent = "⏰ Tiden er gået.";
-          setTimeout(() => (pop.style.display = "none"), 900);
-        }
-      }
-    }
-
-    if (timer) clearInterval(timer);
-    if (!hasSubmitted) timer = setInterval(tick, 250);
-    tick();
-
+    renderCreating(ch, api, socket, myTeamName);
     return;
   }
 
-  // ---------------- VOTING PHASE ----------------
   if (ch.phase === "voting") {
-    stopCamera();
-    timerRow.style.display = "none";
-    videoEl.style.display = "none";
-    photoImgEl.style.display = "none";
-    takeBtn.style.display = "none";
-    retryBtn.style.display = "none";
-    acceptBtn.style.display = "none";
-
-    statusEl.textContent = hasVoted
-      ? "✅ Din stemme er afgivet!"
-      : "Afstemning i gang! Stem på det bedste billede.";
-
-    const photos = ch.votingPhotos || [];
-
-    const grid = document.createElement("div");
-    grid.style.cssText = `
-      display:grid; gap:10px;
-      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
-    `;
-
-    photos.forEach((p, i) => {
-      const owner = p.ownerTeamName;
-      const isMine = owner === myTeamName;
-
-      const btn = document.createElement("button");
-      btn.style.cssText = `
-        text-align:left; padding:8px; border-radius:12px;
-        border:2px solid #0b6; background:#fff; cursor:pointer;
-        font-size:1.1rem;
-        opacity:${isMine ? 0.45 : 1};
-      `;
-      btn.disabled = isMine || hasVoted;
-
-      btn.innerHTML = `
-        <div style="font-weight:900;">Billede #${i + 1}</div>
-        <img src="/uploads/${p.filename}" style="
-          width:100%; border-radius:10px; margin-top:6px;
-          border:1px solid #ccc;
-        "/>
-        ${isMine ? '<div style="margin-top:6px; font-weight:800;">(Dit billede)</div>' : ""}
-      `;
-
-      btn.onclick = () => {
-        if (hasVoted || isMine) return;
-        hasVoted = true;
-        socket.emit("vote", i);
-
-        api.showStatus("✅ Din stemme er afgivet!");
-        statusEl.textContent = "✅ Tak for din stemme!";
-        [...grid.querySelectorAll("button")].forEach(b => (b.disabled = true));
-      };
-
-      grid.appendChild(btn);
-    });
-
-    voteWrap.appendChild(grid);
+    // When voting begins, users should be able to vote even if they submitted earlier
+    // (hasVoted is separate; hasSubmitted stays true but does not block voting)
+    renderVoting(ch, api, socket, myTeamName);
     return;
   }
 
-  // ---------------- ENDED PHASE ----------------
   if (ch.phase === "ended") {
-    stopCamera();
-    timerRow.style.display = "none";
-    videoEl.style.display = "none";
-    photoImgEl.style.display = "none";
-    takeBtn.style.display = "none";
-    retryBtn.style.display = "none";
-    acceptBtn.style.display = "none";
-
-    const winners = ch.winners || [];
-    statusEl.textContent = winners.length
-      ? `🎉 Vindere: ${winners.join(", ")}`
-      : "🎉 Runden er slut!";
-
-    setTimeout(() => (pop.style.display = "none"), 6000);
+    renderEnded(ch, api);
+    return;
   }
+
+  // Unknown phase: be safe
+  api?.showStatus?.("Vent på læreren…");
+  setStatus("");
 }
