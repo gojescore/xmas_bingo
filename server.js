@@ -210,14 +210,14 @@ function lockGrandprix(teamName) {
 
   ch.phase = "locked"; // typing window
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = 20;
+  ch.phaseDurationSec = 30;
   ch.firstBuzz = { teamName };
   ch.typedAnswer = null;
 
   emitState();
 
   // After 20s: if NO typed answer, mark as tried + return to listening.
-  schedulePhaseEnd(20 * 1000, () => {
+  schedulePhaseEnd(30 * 1000, () => {
     const c = state.currentChallenge;
     if (!c || c.type !== "Nisse Grandprix") return;
 
@@ -789,3 +789,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
+
