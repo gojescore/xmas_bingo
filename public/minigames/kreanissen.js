@@ -1,8 +1,10 @@
-// public/minigames/kreanissen.js v2.2.1
+// public/minigames/kreanissen.js v2.3
 // KreaNissen: camera photo only (take/retake/accept) + anonymous voting
-// Keeps your v2.2 fixes exactly.
-// Change (v2.2.1):
-// - Voting status includes "Jeres stemmer"
+// Fixes:
+// - Prevents local taken-photo preview from being reset when another team submits (no more "my photo disappeared")
+// - Keeps your v2.2 UX: take/retake/accept only, no upload option
+// - Uses server timing: phaseStartAt + phaseDurationSec
+// - Second round reliably resets (keyed by phaseStartAt)
 
 let timer = null;
 let popup = null;
@@ -48,7 +50,6 @@ function ensurePopup() {
         Tid tilbage: <span id="knTimeLeft">180</span>s
       </div>
 
-      <!-- CAMERA AREA -->
       <div id="knCameraWrap" style="display:flex; flex-direction:column; gap:10px; align-items:center;">
         <video id="knVideo" autoplay playsinline style="
           width:100%; max-width:640px; border-radius:12px; border:2px solid #ccc; background:#000;
@@ -91,8 +92,11 @@ function ensurePopup() {
   return popup;
 }
 
-async function startCamera() {
-  stopCamera();
+async function startCameraIfNeeded() {
+  // Do not restart the stream on every re-render.
+  // Also: if a photo is currently previewed (video hidden), do not restart.
+  if (stream) return;
+  if (videoEl && videoEl.style.display === "none") return;
 
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -178,9 +182,7 @@ async function uploadBlob(blob) {
 function setCameraUiMode(pop, mode) {
   // mode: "camera" | "submitted" | "hidden"
   const cameraWrap = pop.querySelector("#knCameraWrap");
-  const voteWrap = pop.querySelector("#knVoteWrap");
-
-  if (!cameraWrap || !voteWrap) return;
+  if (!cameraWrap) return;
 
   if (mode === "hidden") {
     cameraWrap.style.display = "none";
@@ -189,7 +191,6 @@ function setCameraUiMode(pop, mode) {
 
   cameraWrap.style.display = "flex";
 
-  // Ensure camera controls are visible again (important for round #2)
   const takeBtn = pop.querySelector("#knTakeBtn");
   const retryBtn = pop.querySelector("#knRetryBtn");
   const acceptBtn = pop.querySelector("#knAcceptBtn");
@@ -199,19 +200,17 @@ function setCameraUiMode(pop, mode) {
   if (acceptBtn) acceptBtn.style.display = "inline-block";
 
   if (mode === "submitted") {
-    // Hide interactive parts but keep status visible
     if (takeBtn) { takeBtn.disabled = true; }
     if (retryBtn) { retryBtn.disabled = true; retryBtn.style.opacity = "0.6"; }
     if (acceptBtn) { acceptBtn.disabled = true; acceptBtn.style.opacity = "0.6"; }
 
+    // Hide live camera/preview (submitted message only)
     if (videoEl) videoEl.style.display = "none";
     if (photoImgEl) photoImgEl.style.display = "none";
-    clearPhoto();
   }
 }
 
 function maybeResetForNewRound(ch) {
-  // Key off phaseStartAt (server sets it every time the minigame starts)
   const key = String(ch?.phaseStartAt || "");
   if (!key) return;
 
@@ -220,7 +219,8 @@ function maybeResetForNewRound(ch) {
     hasSubmitted = false;
     hasVoted = false;
 
-    // Reset local camera/preview state
+    // Reset local camera/preview state for the new round
+    stopCamera();
     clearPhoto();
   }
 }
@@ -248,10 +248,8 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
   const pop = ensurePopup();
   pop.style.display = "flex";
 
-  // Reset flags/UI when a NEW KreaNissen round starts
   maybeResetForNewRound(ch);
 
-  // DOM inside popup
   const promptEl = pop.querySelector("#knPrompt");
   const timeLeftEl = pop.querySelector("#knTimeLeft");
   const statusEl = pop.querySelector("#knStatus");
@@ -267,16 +265,12 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
   const acceptBtn = pop.querySelector("#knAcceptBtn");
 
   if (promptEl) promptEl.textContent = ch.text || "Lav noget kreativt og tag et billede!";
-  if (voteWrap) voteWrap.innerHTML = "";
 
   // ---------------- CREATING PHASE ----------------
   if (ch.phase === "creating") {
     hasVoted = false;
 
-    // Ensure voting area cleared
     if (voteWrap) voteWrap.innerHTML = "";
-
-    // Always show camera wrap in creating phase
     setCameraUiMode(pop, hasSubmitted ? "submitted" : "camera");
     if (timerRow) timerRow.style.display = "block";
 
@@ -286,26 +280,39 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
         : "";
     }
 
-    // Reset button states every render (prevents “round 2 has no choices”)
-    if (takeBtn) { takeBtn.disabled = hasSubmitted; }
-    if (retryBtn) { retryBtn.disabled = true; retryBtn.style.opacity = "0.6"; }
-    if (acceptBtn) { acceptBtn.disabled = true; acceptBtn.style.opacity = "0.6"; }
+    // IMPORTANT: Do NOT reset the local "photo taken" UI if photoBlob exists.
+    const hasTakenPhoto = !!photoBlob;
 
-    // Start camera only if not submitted
-    if (!hasSubmitted) {
+    if (takeBtn) takeBtn.disabled = hasSubmitted;
+
+    if (retryBtn) {
+      retryBtn.disabled = hasSubmitted ? true : !hasTakenPhoto;
+      retryBtn.style.opacity = retryBtn.disabled ? "0.6" : "1";
+    }
+
+    if (acceptBtn) {
+      acceptBtn.disabled = hasSubmitted ? true : !hasTakenPhoto;
+      acceptBtn.style.opacity = acceptBtn.disabled ? "0.6" : "1";
+    }
+
+    // Start camera only if not submitted and we are not currently previewing a photo
+    if (!hasSubmitted && !hasTakenPhoto) {
       try {
-        await startCamera();
+        await startCameraIfNeeded();
       } catch {
         if (statusEl) statusEl.textContent = "⚠️ Kamera kræver tilladelse.";
       }
     } else {
-      stopCamera();
+      // If submitted or previewing, we do not need a running stream.
+      if (hasSubmitted) stopCamera();
     }
 
     if (takeBtn) {
       takeBtn.onclick = async () => {
         if (hasSubmitted) return;
         await takePhoto();
+
+        // Enable retry + accept (and do NOT get reset on other teams' submits)
         if (retryBtn) { retryBtn.disabled = false; retryBtn.style.opacity = "1"; }
         if (acceptBtn) { acceptBtn.disabled = false; acceptBtn.style.opacity = "1"; }
       };
@@ -315,12 +322,9 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
       retryBtn.onclick = () => {
         if (hasSubmitted) return;
         clearPhoto();
-        retryBtn.disabled = true;
-        retryBtn.style.opacity = "0.6";
-        if (acceptBtn) {
-          acceptBtn.disabled = true;
-          acceptBtn.style.opacity = "0.6";
-        }
+        stopCamera(); // ensures a clean restart
+        if (retryBtn) { retryBtn.disabled = true; retryBtn.style.opacity = "0.6"; }
+        if (acceptBtn) { acceptBtn.disabled = true; acceptBtn.style.opacity = "0.6"; }
       };
     }
 
@@ -347,7 +351,6 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
 
           stopCamera();
 
-          // Replace camera UI with a clear “sent” note and keep popup open
           setCameraUiMode(pop, "submitted");
           if (statusEl) statusEl.textContent = "✅ Dit billede er sendt. Vent på afstemning…";
         } catch (e) {
@@ -355,15 +358,17 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
           hasSubmitted = false;
 
           if (takeBtn) takeBtn.disabled = false;
-          if (retryBtn) { retryBtn.disabled = false; retryBtn.style.opacity = "1"; }
-          if (acceptBtn) { acceptBtn.disabled = false; acceptBtn.style.opacity = "1"; }
+
+          // If a photo is still present, allow accept/retry again
+          const stillHasPhoto = !!photoBlob;
+          if (retryBtn) { retryBtn.disabled = !stillHasPhoto; retryBtn.style.opacity = retryBtn.disabled ? "0.6" : "1"; }
+          if (acceptBtn) { acceptBtn.disabled = !stillHasPhoto; acceptBtn.style.opacity = acceptBtn.disabled ? "0.6" : "1"; }
 
           if (statusEl) statusEl.textContent = "⚠️ Upload fejlede. Prøv igen.";
         }
       };
     }
 
-    // Timer (Option 1 fields)
     const startAt = ch.phaseStartAt;
     const total = ch.phaseDurationSec ?? 180;
 
@@ -382,13 +387,11 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
         clearInterval(timer);
         timer = null;
 
-        // Auto accept if a photo is already taken
         if (!hasSubmitted && photoBlob && acceptBtn) {
           acceptBtn.click();
         } else {
           stopCamera();
           if (!hasSubmitted && statusEl) statusEl.textContent = "⏰ Tiden er gået.";
-          // Popup may remain; server will move to voting when ready
         }
       }
     }
@@ -402,25 +405,21 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
 
   // ---------------- VOTING PHASE ----------------
   if (ch.phase === "voting") {
-    // Stop camera and show voting grid
     stopCamera();
-
     if (timer) clearInterval(timer);
     timer = null;
 
     if (timerRow) timerRow.style.display = "none";
     setCameraUiMode(pop, "hidden");
 
-    // ✅ Minimal change: add "Jeres stemmer"
     if (statusEl) {
       statusEl.textContent = hasVoted
-        ? "Jeres stemmer: ✅ Din stemme er afgivet!"
-        : "Jeres stemmer: Afstemning i gang! Stem på det bedste billede.";
+        ? "✅ Din stemme er afgivet!"
+        : "Afstemning i gang! Stem på det bedste billede.";
     }
 
     const photos = Array.isArray(ch.votingPhotos) ? ch.votingPhotos : [];
     if (!photos.length) {
-      // Keep stable message (no flicker)
       if (voteWrap) {
         voteWrap.innerHTML = `
           <div style="font-weight:900; padding:14px;">
@@ -431,11 +430,15 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
       return;
     }
 
+    if (voteWrap) voteWrap.innerHTML = "";
+
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid; gap:10px;
       grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
     `;
+
+    const v = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : 1;
 
     photos.forEach((p, i) => {
       const owner = p.ownerTeamName;
@@ -449,9 +452,6 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
         opacity:${isMine ? 0.45 : 1};
       `;
       btn.disabled = isMine || hasVoted;
-
-      // Stable cache-buster tied to this voting start
-      const v = typeof ch.phaseStartAt === "number" ? ch.phaseStartAt : 1;
 
       btn.innerHTML = `
         <div style="font-weight:900;">Billede #${i + 1}</div>
@@ -468,7 +468,7 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
         socket.emit("vote", i);
 
         api.showStatus("✅ Din stemme er afgivet!");
-        if (statusEl) statusEl.textContent = "Jeres stemmer: ✅ Tak for din stemme!";
+        if (statusEl) statusEl.textContent = "✅ Tak for din stemme!";
         [...grid.querySelectorAll("button")].forEach(b => (b.disabled = true));
       };
 
@@ -495,9 +495,7 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
         : "🎉 Runden er slut!";
     }
 
-    // Keep overall UX consistent with your other minigames
     api?.showStatus?.("Vent på læreren…");
-
     setTimeout(() => (pop.style.display = "none"), 6000);
   }
 }
