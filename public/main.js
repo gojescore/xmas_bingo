@@ -1,8 +1,8 @@
-// public/main.js v43 (multiselect for non-voting challenges; Grandprix stays single-select)
+// public/main.js v43 (minimal fixes)
 // Fixes:
-// - Admin can select multiple “correct” teams for non-voting challenges (NOT Grandprix).
-// - Grandprix remains strict single-select (exactly one team).
-// - Preserves the existing stutter fix (pointerdown + guard) and all other working logic.
+// 1) GP auto-select restored (main/admin auto-selects buzzing team)
+// 2) Multi-select ONLY for non-voting challenges (NOT Grandprix). Voting minigames unchanged.
+// 3) Keeps the existing stutter fix as-is.
 
 const socket = io();
 
@@ -35,10 +35,9 @@ const openVoiceBtn = document.getElementById("openVoiceBtn");
 // STATE
 // =====================================================
 let teams = [];
+let selectedTeamId = null;
 
-// Selection:
-// - Grandprix: single-select (Set size must be 1)
-// - Other non-voting: multi-select
+// Multi-select (only for non-voting, non-GP)
 let selectedTeamIds = new Set();
 
 let deck = [];
@@ -69,54 +68,47 @@ function secondsLeftFromPhase(ch) {
   return Math.max(0, dur - elapsed);
 }
 
-function isGrandprixChallenge() {
-  return currentChallenge?.type === "Nisse Grandprix";
+// =====================================================
+// Selection modes
+// =====================================================
+function isGrandprix(ch) {
+  return ch?.type === "Nisse Grandprix";
+}
+function isVotingMinigame(ch) {
+  return ch?.type === "JuleKortet" || ch?.type === "KreaNissen";
+}
+function isMultiSelectAllowed(ch) {
+  // Explicitly NOT Grandprix and NOT voting games.
+  if (!ch) return false;
+  if (isGrandprix(ch)) return false;
+  if (isVotingMinigame(ch)) return false;
+
+  // Your “non-voting minigames”:
+  return ch.type === "NisseGåden" || ch.type === "BilledeQuiz";
 }
 
-function clearSelection() {
-  selectedTeamIds.clear();
+function clearSelections() {
+  selectedTeamId = null;
+  selectedTeamIds = new Set();
 }
 
-function getSelectedIdsArray() {
-  return Array.from(selectedTeamIds);
-}
+function pruneSelections() {
+  const ids = new Set((teams || []).map((t) => t.id));
+  if (selectedTeamId && !ids.has(selectedTeamId)) selectedTeamId = null;
 
-function getSingleSelectedId() {
-  const arr = getSelectedIdsArray();
-  return arr.length ? arr[0] : null;
-}
-
-function pruneSelectionToExistingTeams() {
-  const existing = new Set((teams || []).map((t) => t.id));
-  for (const id of Array.from(selectedTeamIds)) {
-    if (!existing.has(id)) selectedTeamIds.delete(id);
+  const next = new Set();
+  for (const id of selectedTeamIds) {
+    if (ids.has(id)) next.add(id);
   }
-}
-
-function enforceGrandprixSingleSelect() {
-  if (!isGrandprixChallenge()) return;
-
-  // Keep at most one selected id.
-  const arr = getSelectedIdsArray();
-  if (arr.length <= 1) return;
-
-  // Keep the most recently added is hard to know reliably,
-  // so keep the first in iteration order and drop the rest.
-  const keep = arr[0];
-  selectedTeamIds = new Set([keep]);
+  selectedTeamIds = next;
 }
 
 // =====================================================
 // Robust button activation (stutter fix)
 // =====================================================
-// Why:
-// - Some setups miss "click" due to focus/overlay/trackpad/touch behavior.
-// - pointerdown fires earlier and more consistently.
-// - Guard ensures one physical press => one emit.
 function attachReliableActivate(btn, handler) {
   if (!btn || typeof handler !== "function") return;
 
-  // Helps mobile/trackpad by reducing delay and double-tap behavior
   btn.style.touchAction = "manipulation";
   btn.style.userSelect = "none";
   btn.style.webkitUserSelect = "none";
@@ -133,19 +125,14 @@ function attachReliableActivate(btn, handler) {
     handler();
   };
 
-  // Primary: pointerdown (covers mouse, pen, touch)
   btn.addEventListener("pointerdown", fireOnce, { passive: false });
-
-  // Fallbacks (some browsers/input paths are odd)
   btn.addEventListener("mousedown", fireOnce, { passive: false });
   btn.addEventListener("touchstart", fireOnce, { passive: false });
 
-  // Keyboard accessibility
   btn.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") fireOnce(e);
   });
 
-  // In case the element stays around for long and you ever need to re-enable:
   btn.__resetReliableActivate = () => { fired = false; };
 }
 
@@ -554,7 +541,7 @@ function renderDeck() {
       socket.emit("admin:selectChallenge", card);
 
       card.used = true;
-      clearSelection();
+      clearSelections();
       if (endGameResultEl) endGameResultEl.textContent = "";
 
       renderDeck();
@@ -578,8 +565,11 @@ function renderTeams() {
 
   teamListEl.innerHTML = "";
 
+  const multi = isMultiSelectAllowed(currentChallenge);
+
   sorted.forEach((team) => {
-    const isSelected = selectedTeamIds.has(team.id);
+    const isSelected = multi ? selectedTeamIds.has(team.id) : (team.id === selectedTeamId);
+
     const li = document.createElement("li");
     li.className = "team-item" + (isSelected ? " selected" : "");
 
@@ -621,15 +611,20 @@ function renderTeams() {
     li.append(nameSpan, pointsDiv);
 
     li.onclick = () => {
-      const gp = isGrandprixChallenge();
+      // Voting minigames do not use selection; keep selection stable.
+      if (isVotingMinigame(currentChallenge)) return;
 
-      if (gp) {
-        // SINGLE SELECT for Grandprix
-        selectedTeamIds = new Set([team.id]);
-      } else {
-        // MULTI SELECT for non-voting challenges
+      if (isGrandprix(currentChallenge)) {
+        // GP is always single-select
+        selectedTeamId = team.id;
+        selectedTeamIds = new Set(); // keep clean
+      } else if (multi) {
+        // Multi-select (NisseGåden/BilledeQuiz)
         if (selectedTeamIds.has(team.id)) selectedTeamIds.delete(team.id);
         else selectedTeamIds.add(team.id);
+      } else {
+        selectedTeamId = team.id;
+        selectedTeamIds = new Set();
       }
 
       renderTeams();
@@ -854,7 +849,6 @@ function renderMiniGameArea() {
       finishBtn.className = "challenge-card";
 
       attachReliableActivate(finishBtn, () => {
-        // UI feedback
         finishBtn.disabled = true;
         finishBtn.textContent = "Lukker…";
         socket.emit("admin:closeVoting");
@@ -976,23 +970,32 @@ function renderMiniGameArea() {
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
 
-  const ids = getSelectedIdsArray();
+  // Voting minigames do not use yes/no
+  if (isVotingMinigame(currentChallenge)) return;
 
-  // Grandprix explicitly stays single-select
-  if (currentChallenge.type === "Nisse Grandprix") {
-    if (ids.length !== 1) return alert("Vælg præcis ét hold til Grandprix.");
-    socket.emit("admin:decision", { decision: "yes", selectedTeamId: ids[0] });
+  // GP: MUST remain single selection (auto-select will set selectedTeamId)
+  if (isGrandprix(currentChallenge)) {
+    if (!selectedTeamId) return alert("Vælg vinderholdet.");
+    socket.emit("admin:decision", { decision: "yes", selectedTeamId });
     return;
   }
 
-  // Other non-voting challenges: allow multi-select
-  if (!ids.length) return alert("Vælg mindst ét vinderhold.");
-  socket.emit("admin:decision", { decision: "yes", selectedTeamIds: ids });
+  // Non-voting multi-select
+  if (isMultiSelectAllowed(currentChallenge)) {
+    const ids = Array.from(selectedTeamIds);
+    if (!ids.length) return alert("Vælg mindst ét hold.");
+    socket.emit("admin:decision", { decision: "yes", selectedTeamIds: ids });
+    return;
+  }
+
+  // Default single-select
+  if (!selectedTeamId) return alert("Vælg vinderholdet.");
+  socket.emit("admin:decision", { decision: "yes", selectedTeamId });
 };
 
 noBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
-  socket.emit("admin:decision", { decision: "no", selectedTeamId: getSingleSelectedId() });
+  socket.emit("admin:decision", { decision: "no", selectedTeamId });
 };
 
 incompleteBtn.onclick = () => {
@@ -1064,11 +1067,23 @@ socket.on("state", (s) => {
     deck = s.deck;
   }
 
-  // Keep selection sane vs server updates
-  pruneSelectionToExistingTeams();
-  enforceGrandprixSingleSelect();
-
   if (gameCodeValueEl) gameCodeValueEl.textContent = gameCode || "—";
+
+  // ---- Restore GP auto-select: pick buzzing team automatically on admin ----
+  if (isGrandprix(currentChallenge)) {
+    const buzzName = currentChallenge?.firstBuzz?.teamName;
+    if (buzzName) {
+      const match = teams.find((t) => t.name === buzzName);
+      if (match && selectedTeamId !== match.id) {
+        selectedTeamId = match.id;
+      }
+    }
+    // Keep multi-select empty during GP
+    selectedTeamIds = new Set();
+  }
+
+  // ---- If multi-select mode is ON, keep selectedTeamId independent ----
+  pruneSelections();
 
   renderTeams();
   renderDeck();
