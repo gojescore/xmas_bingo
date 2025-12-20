@@ -1,8 +1,11 @@
-// public/main.js v42 (stutter fix only)
-// Fix:
-// - "Luk afstemning og giv point" sometimes misses clicks on main computer.
-// - Use pointerdown + guard to ensure the action triggers reliably exactly once per press.
-// - Do NOT change working logic elsewhere.
+// public/main.js v43 (stutter fix + GP auto-select buzzing team for YES)
+// Fixes:
+// 1) "Luk afstemning og giv point" sometimes misses clicks on main computer.
+//    - Previous v42 guard could get stuck (fired stayed true), causing missed later presses.
+//    - New guard: time-based debounce per button, so every physical press is acknowledged.
+// 2) Grandprix: YES now auto-selects the buzzing team if you haven't selected a team manually.
+//    - Does NOT override a manual selection.
+//    - Only applies to "Nisse Grandprix".
 
 const socket = io();
 
@@ -71,20 +74,24 @@ function secondsLeftFromPhase(ch) {
 // Why:
 // - Some setups miss "click" due to focus/overlay/trackpad/touch behavior.
 // - pointerdown fires earlier and more consistently.
-// - Guard ensures one physical press => one emit.
+// - Debounce prevents double-fires but DOES NOT get stuck for future presses.
 function attachReliableActivate(btn, handler) {
   if (!btn || typeof handler !== "function") return;
 
-  // Helps mobile/trackpad by reducing delay and double-tap behavior
   btn.style.touchAction = "manipulation";
   btn.style.userSelect = "none";
   btn.style.webkitUserSelect = "none";
 
-  let fired = false;
+  let lastFireAt = 0;
 
-  const fireOnce = (e) => {
-    if (fired) return;
-    fired = true;
+  const fire = (e) => {
+    // Do not block if button is disabled
+    if (btn.disabled) return;
+
+    const now = Date.now();
+    // Debounce duplicates from pointerdown + mousedown + click, etc.
+    if (now - lastFireAt < 250) return;
+    lastFireAt = now;
 
     try { e.preventDefault(); } catch {}
     try { e.stopPropagation(); } catch {}
@@ -92,20 +99,17 @@ function attachReliableActivate(btn, handler) {
     handler();
   };
 
-  // Primary: pointerdown (covers mouse, pen, touch)
-  btn.addEventListener("pointerdown", fireOnce, { passive: false });
+  // Primary: pointerdown (mouse/pen/touch)
+  btn.addEventListener("pointerdown", fire, { passive: false });
 
-  // Fallbacks (some browsers/input paths are odd)
-  btn.addEventListener("mousedown", fireOnce, { passive: false });
-  btn.addEventListener("touchstart", fireOnce, { passive: false });
+  // Fallbacks
+  btn.addEventListener("mousedown", fire, { passive: false });
+  btn.addEventListener("touchstart", fire, { passive: false });
 
   // Keyboard accessibility
   btn.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") fireOnce(e);
+    if (e.key === "Enter" || e.key === " ") fire(e);
   });
-
-  // In case the element stays around for long and you ever need to re-enable:
-  btn.__resetReliableActivate = () => { fired = false; };
 }
 
 // =====================================================
@@ -802,7 +806,6 @@ function renderMiniGameArea() {
       finishBtn.className = "challenge-card";
 
       attachReliableActivate(finishBtn, () => {
-        // UI feedback
         finishBtn.disabled = true;
         finishBtn.textContent = "Lukker…";
         socket.emit("admin:closeVoting");
@@ -919,10 +922,35 @@ function renderMiniGameArea() {
 }
 
 // =====================================================
+// Grandprix: auto-select buzzing team when pressing YES
+// =====================================================
+function autoSelectFirstBuzzTeamIfNeeded() {
+  if (selectedTeamId) return; // never override manual selection
+  if (!currentChallenge) return;
+  if (currentChallenge.type !== "Nisse Grandprix") return;
+
+  const buzzName = currentChallenge.firstBuzz?.teamName;
+  if (!buzzName) return;
+
+  const target = teams.find(
+    (t) => (t.name || "").trim().toLowerCase() === String(buzzName).trim().toLowerCase()
+  );
+
+  if (target) {
+    selectedTeamId = target.id;
+    renderTeams(); // reflect selection visually
+  }
+}
+
+// =====================================================
 // Decision buttons
 // =====================================================
 yesBtn.onclick = () => {
   if (!currentChallenge) return alert("Vælg en udfordring først.");
+
+  // NEW: For Grandprix, auto-select the buzzing team if none selected
+  autoSelectFirstBuzzTeamIfNeeded();
+
   if (!selectedTeamId) return alert("Vælg vinderholdet.");
   socket.emit("admin:decision", { decision: "yes", selectedTeamId });
 };
