@@ -502,3 +502,4 @@ export async function renderKreaNissen(ch, api, socket, myTeamName) {
     setTimeout(() => (pop.style.display = "none"), 6000);
   }
 }
+
