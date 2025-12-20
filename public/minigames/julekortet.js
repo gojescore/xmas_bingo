@@ -1,8 +1,10 @@
-// public/minigames/julekortet.js v7
-// Fixes:
+// public/minigames/julekortet.js v7.1
+// Fixes (keeps your v7):
 // - Prevent flashing / reappearing typing box by NOT relying on stop/recreate per tick
 // - After submit: replace typing UI with stable "Dit svar er sendt" view (no more typing)
 // - Uses server-authoritative timing: phaseStartAt + phaseDurationSec
+// Change (v7.1):
+// - Voting status includes "Jeres stemmer"
 
 let writingTimer = null;
 let popupEl = null;
@@ -224,10 +226,11 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
     clearWritingTimer();
     showVotingView(popup);
 
+    // ✅ Minimal change: add "Jeres stemmer"
     if (statusEl) {
       statusEl.textContent = hasVoted
-        ? "✅ Din stemme er afgivet!"
-        : "Afstemning i gang! Vælg jeres favoritkort.";
+        ? "Jeres stemmer: ✅ Din stemme er afgivet!"
+        : "Jeres stemmer: Afstemning i gang! Vælg jeres favoritkort.";
     }
 
     if (voteWrap) voteWrap.innerHTML = "";
@@ -264,7 +267,7 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
         socket.emit("vote", i);
 
         api?.showStatus?.("✅ Din stemme er afgivet!");
-        if (statusEl) statusEl.textContent = "✅ Tak for din stemme!";
+        if (statusEl) statusEl.textContent = "Jeres stemmer: ✅ Tak for din stemme!";
         [...grid.querySelectorAll("button")].forEach((b) => (b.disabled = true));
       };
 
