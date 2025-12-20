@@ -1,8 +1,9 @@
-// public/team.js (toast enhancement only)
-// Change:
-// - points-toast can include { reason, answer, challengeType, challengeTitle }.
-// - Toast stays longer (+3s).
-// - If answer is provided, show it on a second line (Facit: ...).
+// public/team.js (routing stability + toast enhancement + korrekt->dashes)
+// Fixes (team-side):
+// - Do NOT stop/recreate minigames on every state tick (this broke JuleKortet "sent" view and KreaNissen camera/photo state).
+// - Only stop/start minigames when the challenge actually CHANGES (type or id).
+// - Keep GP logic intact.
+// - Replace "korrekt" with "------------------------" in user-visible team text (status/toast/challengeText).
 
 import { renderGrandprix, stopGrandprix } from "./minigames/grandprix.js?v=4";
 import { renderNisseGaaden, stopNisseGaaden } from "./minigames/nissegaaden.js";
@@ -50,6 +51,17 @@ let gpSentThisRound = false;
 
 let ngAnsweredRoundId = null;
 
+// Track currently active challenge so we don't nuke popups every state tick
+let activeChallengeType = null;
+let activeChallengeId = null;
+
+// ---------- Small text normalizer ----------
+function dashifyKorrekt(s) {
+  const str = String(s ?? "");
+  // Replace "korrekt" in any case; keep it simple and predictable
+  return str.replace(/korrekt/gi, "------------------------");
+}
+
 // ---------- Time helpers ----------
 function updateServerOffset(serverNow) {
   if (typeof serverNow === "number") serverOffsetMs = serverNow - Date.now();
@@ -72,16 +84,15 @@ function showScoreToast(teamName, delta, meta = {}) {
 
   const abs = Math.abs(delta);
 
-  const reason = (meta?.reason || "").trim();
-  const answer = (meta?.answer || "").trim();
+  const reason = dashifyKorrekt((meta?.reason || "").trim());
+  const answer = dashifyKorrekt((meta?.answer || "").trim());
 
   const base =
     delta > 0
       ? `${teamName} har fået ${abs} point!`
       : `${teamName} har mistet ${abs} point!`;
 
-  // Build message with optional extra lines
-  const lines = [base];
+  const lines = [dashifyKorrekt(base)];
   if (reason) lines.push(reason);
   if (answer) lines.push(`Facit: ${answer}`);
 
@@ -89,7 +100,6 @@ function showScoreToast(teamName, delta, meta = {}) {
   if (delta > 0) scoreToastEl.classList.add("score-toast--gain");
   else scoreToastEl.classList.add("score-toast--loss");
 
-  // Use <br> so it’s clearly separated
   scoreToastEl.innerHTML = lines.map((l) => String(l)).join("<br>");
 
   void scoreToastEl.offsetWidth;
@@ -97,7 +107,7 @@ function showScoreToast(teamName, delta, meta = {}) {
 
   if (scoreToastTimeout) clearTimeout(scoreToastTimeout);
 
-  // Was 4000ms; keep it ~3 seconds longer.
+  // Keep it ~3 seconds longer than the old 4s.
   scoreToastTimeout = setTimeout(() => {
     scoreToastEl.classList.remove("score-toast--show");
   }, 7000);
@@ -185,7 +195,7 @@ function showWinnerOverlay(payload = {}) {
   const namesEl = document.getElementById("winnerOverlayNames");
   const scoreEl = document.getElementById("winnerOverlayScore");
 
-  if (msgEl) msgEl.textContent = message || "";
+  if (msgEl) msgEl.textContent = dashifyKorrekt(message || "");
   if (namesEl) namesEl.textContent = winners?.length ? winners.join(", ") : "Ingen vinder fundet";
   if (scoreEl) scoreEl.textContent = topScore ?? 0;
 
@@ -198,13 +208,14 @@ const api = {
     if (buzzBtn) buzzBtn.disabled = !enabled;
   },
   showStatus(text) {
-    if (statusEl) statusEl.textContent = text;
+    if (statusEl) statusEl.textContent = dashifyKorrekt(text || "");
   },
   clearMiniGame() {
     if (statusEl) statusEl.textContent = "";
     if (buzzBtn) buzzBtn.disabled = true;
     hideGrandprixPopup();
     hideNisseGaadenAnswer();
+    // Only stop BilledeQuiz here because it is not popup-driven the same way.
     stopBilledeQuiz(api);
   }
 };
@@ -471,39 +482,73 @@ function normType(type) {
   return type;
 }
 
-// ===========================
-// Challenge router
-// ===========================
-function renderChallenge(ch) {
-  api.setBuzzEnabled(false);
-  hideNisseGaadenAnswer();
-
+function stopAllMinigames() {
+  // Stop all once (used only on real challenge switches)
   stopGrandprix();
   stopNisseGaaden(api);
   stopJuleKortet(api);
   stopKreaNissen(api);
   stopBilledeQuiz(api);
+  hideGrandprixPopup();
+  hideNisseGaadenAnswer();
+}
 
+// ===========================
+// Challenge router (STABLE)
+// ===========================
+function renderChallengeStable(chRaw) {
+  const ch = chRaw ? { ...chRaw, type: normType(chRaw.type) } : null;
+
+  // If no challenge: stop everything once and show waiting
   if (!ch) {
+    if (activeChallengeType !== null || activeChallengeId !== null) {
+      stopAllMinigames();
+      activeChallengeType = null;
+      activeChallengeId = null;
+    }
+
     if (challengeTitle) challengeTitle.textContent = "Ingen udfordring endnu";
     if (challengeText) challengeText.textContent = "Vent på læreren…";
     api.clearMiniGame();
     return;
   }
 
-  ch.type = normType(ch.type);
+  const nextType = ch.type || null;
+  const nextId = ch.id || null;
 
-  window.__currentRoundId = ch.id || null;
+  const changed =
+    nextType !== activeChallengeType ||
+    nextId !== activeChallengeId;
 
-  if (challengeTitle) challengeTitle.textContent = ch.type || "Udfordring";
-  if (challengeText) challengeText.textContent = ch.text || "";
+  // Only stop/restart minigames when the challenge actually changed
+  if (changed) {
+    stopAllMinigames();
 
-  if (ch.type === "Nisse Grandprix") {
+    activeChallengeType = nextType;
+    activeChallengeId = nextId;
+
+    // New round id available to other parts
+    window.__currentRoundId = nextId;
+
+    // Reset per-round trackers for inputs (safe + expected)
+    // GP is already keyed by gpAnsweredRoundId; leave its logic as-is.
+    // For NisseGåden, answered tracking uses ngAnsweredRoundId vs ch.id.
+  } else {
+    // Same challenge: DO NOT stop popups; allow minigame modules to keep their internal state.
+    window.__currentRoundId = nextId;
+  }
+
+  // Update header text every tick (safe)
+  if (challengeTitle) challengeTitle.textContent = nextType || "Udfordring";
+  if (challengeText) challengeText.textContent = dashifyKorrekt(ch.text || "");
+
+  // Route by type
+  if (nextType === "Nisse Grandprix") {
     renderGrandprix(ch, api);
     return;
   }
 
-  if (ch.type === "NisseGåden") {
+  if (nextType === "NisseGåden") {
     renderNisseGaaden(ch, api);
 
     const alreadyAnswered = ch.id && ngAnsweredRoundId && ch.id === ngAnsweredRoundId;
@@ -513,17 +558,17 @@ function renderChallenge(ch) {
     return;
   }
 
-  if (ch.type === "JuleKortet") {
+  if (nextType === "JuleKortet") {
     renderJuleKortet(ch, api, socket, myTeamName);
     return;
   }
 
-  if (ch.type === "KreaNissen") {
+  if (nextType === "KreaNissen") {
     renderKreaNissen(ch, api, socket, myTeamName);
     return;
   }
 
-  if (ch.type === "BilledeQuiz") {
+  if (nextType === "BilledeQuiz") {
     renderBilledeQuiz(ch, api);
     return;
   }
@@ -542,8 +587,9 @@ socket.on("state", (s) => {
   if (s.gameCode && codeDisplay) codeDisplay.textContent = s.gameCode;
 
   renderLeaderboard(s.teams || []);
-  renderChallenge(s.currentChallenge);
+  renderChallengeStable(s.currentChallenge);
 
+  // Below is GP-specific overlay logic (kept intact)
   const chRaw = s.currentChallenge;
   const ch = chRaw ? { ...chRaw, type: normType(chRaw.type) } : null;
 
@@ -588,7 +634,7 @@ socket.on("state", (s) => {
   }
 });
 
-// points toast (now supports answer/reason)
+// points toast (supports answer/reason)
 socket.on("points-toast", ({ teamName, delta, reason, answer, challengeType, challengeTitle }) => {
   showScoreToast(teamName, delta, { reason, answer, challengeType, challengeTitle });
 });
