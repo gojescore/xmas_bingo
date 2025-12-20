@@ -280,11 +280,12 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
     clearWritingTimer();
 
     const winners = ch.winners || [];
-    if (statusEl) {
-      statusEl.textContent = winners.length
-        ? `🎉 Vindere: ${winners.join(", ")}`
-        : "🎉 Runden er slut!";
-    }
+if (statusEl) {
+  statusEl.textContent = winners.length
+    ? `🎉 Vindere: ${winners.join(", ")} — afgjort ved jeres afstemning`
+    : "🎉 Runden er slut! — afgjort ved jeres afstemning";
+}
+
 
     setTimeout(() => {
       if (popupEl) popupEl.style.display = "none";
@@ -299,3 +300,4 @@ export function renderJuleKortet(ch, api, socket, myTeamName) {
   if (popupEl) popupEl.style.display = "none";
   api?.clearMiniGame?.();
 }
+
