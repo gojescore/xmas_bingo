@@ -8,6 +8,7 @@
 // - Admin YES can award MULTIPLE winners for non-voting challenges (NOT Grandprix)
 // - NEW PATCH: On admin YES for non-voting challenges, keep currentChallenge alive ~3s so teams can show the correct answer
 // - NEW PATCH: points-toast now includes { reason, answer, challengeType, challengeTitle } when available
+// - NEW PATCH: JuleKortet + KreaNissen toasts include reason: "afgjort ved jeres afstemning"
 // Keeps existing uploads + legacy events + serverNow in state emissions
 
 const express = require("express");
@@ -115,7 +116,7 @@ function tallyVotes(votesObj, itemsLen) {
   return counts;
 }
 
-// NEW: attempt to read the correct answer from the current challenge/card safely
+// Attempt to read the correct answer from the current challenge/card safely
 function getCorrectAnswerFromChallenge(ch) {
   if (!ch) return "";
 
@@ -151,7 +152,6 @@ function awardPoint(teamName, delta = 1, meta = {}) {
   const actualDelta = (team.points ?? 0) - before;
 
   if (actualDelta !== 0) {
-    // NEW: include meta (reason/answer/etc) if provided
     io.emit("points-toast", {
       teamName: team.name,
       delta: actualDelta,
@@ -222,7 +222,7 @@ function clearCurrentChallenge() {
   setChallenge(null);
 }
 
-// NEW: End + hold the challenge in state briefly (to show correct answer / winners)
+// End + hold the challenge in state briefly (to show correct answer / winners)
 function endChallengeWithHold(ms = 3000, extra = {}) {
   const ch = state.currentChallenge;
   if (!ch) return;
@@ -261,7 +261,7 @@ function startGrandprix(card) {
     phase: "listening",
     phaseStartAt: startAt,
     phaseDurationSec: null, // not timed
-    startAt,               // audio start timestamp used by client minigame
+    startAt, // audio start timestamp used by client minigame
     firstBuzz: null,
     typedAnswer: null,
     answeredTeams: {},
@@ -324,9 +324,9 @@ function setGrandprixAwaitingDecision() {
   // Stop the auto-release timer; wait for admin YES/NO
   clearPhaseTimer();
 
-  ch.phase = "awaiting";       // new phase: waiting for admin decision
+  ch.phase = "awaiting"; // waiting for admin decision
   ch.phaseStartAt = nowMs();
-  ch.phaseDurationSec = null;  // no countdown
+  ch.phaseDurationSec = null; // no countdown
 
   emitState();
 }
@@ -439,7 +439,16 @@ function finishJuleKortetAndAward() {
     .map((x) => cards[x.i]?.ownerTeamName)
     .filter(Boolean);
 
-  for (const name of winners) awardPoint(name, 1);
+  // Toast meta for voting-based games (your requested text)
+  const toastMeta = {
+    reason: "afgjort ved jeres afstemning",
+    // (If your deck/card has an answer field for this game, it will be shown too; otherwise blank.)
+    answer: getCorrectAnswerFromChallenge(ch) || "",
+    challengeType: ch.type || "",
+    challengeTitle: ch.title || ch.name || ch.type || "",
+  };
+
+  for (const name of winners) awardPoint(name, 1, toastMeta);
 
   ch.phase = "ended";
   ch.phaseStartAt = nowMs();
@@ -518,7 +527,16 @@ function finishKreaAndAward() {
     .map((x) => photos[x.i]?.ownerTeamName)
     .filter(Boolean);
 
-  for (const name of winners) awardPoint(name, 1);
+  // Toast meta for voting-based games (your requested text)
+  const toastMeta = {
+    reason: "afgjort ved jeres afstemning",
+    // (If your deck/card has an answer field for this game, it will be shown too; otherwise blank.)
+    answer: getCorrectAnswerFromChallenge(ch) || "",
+    challengeType: ch.type || "",
+    challengeTitle: ch.title || ch.name || ch.type || "",
+  };
+
+  for (const name of winners) awardPoint(name, 1, toastMeta);
 
   ch.phase = "ended";
   ch.phaseStartAt = nowMs();
@@ -676,25 +694,25 @@ io.on("connection", (socket) => {
     // Always stop GP audio on decisions (safe, consistent)
     io.emit("gp-stop-audio-now");
 
-// Grandprix must remain SINGLE winner selection
-if (ch.type === "Nisse Grandprix") {
-  const t = pickTeamById(selectedTeamId);
+    // ---------------- YES ----------------
+    if (decision === "yes") {
+      // Grandprix must remain SINGLE winner selection
+      if (ch.type === "Nisse Grandprix") {
+        const t = pickTeamById(selectedTeamId);
 
-  // Add toast meta so teams can display the correct answer too
-  const correctAnswer = getCorrectAnswerFromChallenge(ch); // uses your helper already
-  const toastMeta = {
-    reason: "------------------------",
-    answer: correctAnswer || "",
-    challengeType: ch.type || "",
-    challengeTitle: ch.title || ch.name || ch.type || "",
-  };
+        const correctAnswer = getCorrectAnswerFromChallenge(ch);
+        const toastMeta = {
+          reason: "------------------------",
+          answer: correctAnswer || "",
+          challengeType: ch.type || "",
+          challengeTitle: ch.title || ch.name || ch.type || "",
+        };
 
-  if (t) awardPoint(t.name, 1, toastMeta);
+        if (t) awardPoint(t.name, 1, toastMeta);
 
-  clearCurrentChallenge();
-  return;
-}
-
+        clearCurrentChallenge();
+        return;
+      }
 
       // Non-voting challenges: allow MULTIPLE winners
       const ids = Array.isArray(selectedTeamIds)
@@ -703,9 +721,9 @@ if (ch.type === "Nisse Grandprix") {
 
       const winnerNames = [];
 
-      // NEW: prepare toast meta for non-voting challenges
       const isNonVoting = isNonVotingChallengeType(ch.type);
       const correctAnswer = isNonVoting ? getCorrectAnswerFromChallenge(ch) : "";
+
       const toastMeta = isNonVoting
         ? {
             reason: "------------------------",
@@ -734,6 +752,7 @@ if (ch.type === "Nisse Grandprix") {
       return;
     }
 
+    // ---------------- NO ----------------
     if (decision === "no") {
       // Grandprix: if we are judging a buzz (locked/awaiting), resume listening and mark that team tried
       if (ch.type === "Nisse Grandprix" && (ch.phase === "locked" || ch.phase === "awaiting")) {
@@ -744,8 +763,10 @@ if (ch.type === "Nisse Grandprix") {
       return;
     }
 
+    // ---------------- INCOMPLETE ----------------
     if (decision === "incomplete") {
       clearCurrentChallenge();
+      return;
     }
   });
 
@@ -915,4 +936,3 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
-
