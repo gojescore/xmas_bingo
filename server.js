@@ -676,14 +676,25 @@ io.on("connection", (socket) => {
     // Always stop GP audio on decisions (safe, consistent)
     io.emit("gp-stop-audio-now");
 
-    if (decision === "yes") {
-      // Grandprix must remain SINGLE winner selection
-      if (ch.type === "Nisse Grandprix") {
-        const t = pickTeamById(selectedTeamId);
-        if (t) awardPoint(t.name, 1);
-        clearCurrentChallenge();
-        return;
-      }
+// Grandprix must remain SINGLE winner selection
+if (ch.type === "Nisse Grandprix") {
+  const t = pickTeamById(selectedTeamId);
+
+  // Add toast meta so teams can display the correct answer too
+  const correctAnswer = getCorrectAnswerFromChallenge(ch); // uses your helper already
+  const toastMeta = {
+    reason: "------------------------",
+    answer: correctAnswer || "",
+    challengeType: ch.type || "",
+    challengeTitle: ch.title || ch.name || ch.type || "",
+  };
+
+  if (t) awardPoint(t.name, 1, toastMeta);
+
+  clearCurrentChallenge();
+  return;
+}
+
 
       // Non-voting challenges: allow MULTIPLE winners
       const ids = Array.isArray(selectedTeamIds)
@@ -904,3 +915,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log("Xmas Challenge server listening on port", PORT);
 });
+
