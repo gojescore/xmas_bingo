@@ -7,6 +7,7 @@
 // - Grandprix listening uses startAt synced to phaseStartAt (small delay) for more consistent playback
 // - Admin YES can award MULTIPLE winners for non-voting challenges (NOT Grandprix)
 // - NEW PATCH: On admin YES for non-voting challenges, keep currentChallenge alive ~3s so teams can show the correct answer
+// - NEW PATCH: points-toast now includes { reason, answer, challengeType, challengeTitle } when available
 // Keeps existing uploads + legacy events + serverNow in state emissions
 
 const express = require("express");
@@ -114,7 +115,34 @@ function tallyVotes(votesObj, itemsLen) {
   return counts;
 }
 
-function awardPoint(teamName, delta = 1) {
+// NEW: attempt to read the correct answer from the current challenge/card safely
+function getCorrectAnswerFromChallenge(ch) {
+  if (!ch) return "";
+
+  // Common field names (use whichever exists)
+  const candidates = [
+    ch.correctAnswer,
+    ch.answer,
+    ch.facit,
+    ch.solution,
+    ch.correct,
+    ch.rightAnswer,
+    ch.expectedAnswer,
+  ];
+
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+
+  // If answer is an array (e.g., multiple acceptable), join it
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length) return c.map((x) => String(x)).join(" / ");
+  }
+
+  return "";
+}
+
+function awardPoint(teamName, delta = 1, meta = {}) {
   const team = state.teams.find((t) => (t.name || "") === teamName);
   if (!team) return;
 
@@ -123,7 +151,15 @@ function awardPoint(teamName, delta = 1) {
   const actualDelta = (team.points ?? 0) - before;
 
   if (actualDelta !== 0) {
-    io.emit("points-toast", { teamName: team.name, delta: actualDelta });
+    // NEW: include meta (reason/answer/etc) if provided
+    io.emit("points-toast", {
+      teamName: team.name,
+      delta: actualDelta,
+      reason: meta?.reason,
+      answer: meta?.answer,
+      challengeType: meta?.challengeType,
+      challengeTitle: meta?.challengeTitle,
+    });
   }
 }
 
@@ -202,7 +238,7 @@ function endChallengeWithHold(ms = 3000, extra = {}) {
   ch.phaseStartAt = nowMs();
   ch.phaseDurationSec = null;
 
-  // Optional: winners etc. for the team popup layer
+  // Optional: winners etc. for the team layer
   Object.assign(ch, extra);
 
   emitState();
@@ -655,22 +691,34 @@ io.on("connection", (socket) => {
         : (selectedTeamId ? [selectedTeamId] : []);
 
       const winnerNames = [];
+
+      // NEW: prepare toast meta for non-voting challenges
+      const isNonVoting = isNonVotingChallengeType(ch.type);
+      const correctAnswer = isNonVoting ? getCorrectAnswerFromChallenge(ch) : "";
+      const toastMeta = isNonVoting
+        ? {
+            reason: "------------------------",
+            answer: correctAnswer || "",
+            challengeType: ch.type || "",
+            challengeTitle: ch.title || ch.name || ch.type || "",
+          }
+        : null;
+
       for (const id of ids) {
         const t = pickTeamById(id);
         if (t) {
-          awardPoint(t.name, 1);
+          if (toastMeta) awardPoint(t.name, 1, toastMeta);
+          else awardPoint(t.name, 1);
           winnerNames.push(t.name);
         }
       }
 
-      // PATCH: keep the challenge alive briefly so teams can show the correct answer
-      // Only applies to your non-voting types (NisseGåden / BilledeQuiz). Others keep existing behavior.
-      if (isNonVotingChallengeType(ch.type)) {
+      // Keep the challenge alive briefly for non-voting so teams have time to show toast/answer
+      if (isNonVoting) {
         endChallengeWithHold(3000, { winners: winnerNames });
         return;
       }
 
-      // For anything else non-GP (if you add future types), default to clear immediately
       clearCurrentChallenge();
       return;
     }
@@ -686,7 +734,6 @@ io.on("connection", (socket) => {
     }
 
     if (decision === "incomplete") {
-      // Optional: you can hold here too, but keeping your existing behavior (immediate clear).
       clearCurrentChallenge();
     }
   });
