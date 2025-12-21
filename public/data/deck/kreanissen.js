@@ -5,21 +5,22 @@ export const DECK = [
   {
     id: "kn1",
     type: "KreaNissen",
-    title: "KreaNissen 1",
+    title: "Sjoveste nisse",
     text: "Lav den sjoveste nisse med ting i klassen. Tag et billede!",
-    answer: "Eleverne stemmer (sjoveste nisse)",
+    answer: "Afgjort ved afstemning",
     used: false
   },
   {
     id: "kn2",
     type: "KreaNissen",
-    title: "KreaNissen 2",
+    title: "Julebillede (klassen)",
     text: "Tag et julebillede af klassen!",
-    answer: "Eleverne stemmer (selfie)",
+    answer: "Afgjort ved afstemning",
     used: false
   }
  
 ];
+
 
 
 
